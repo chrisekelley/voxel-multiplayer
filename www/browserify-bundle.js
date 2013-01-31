@@ -432,2274 +432,82 @@ process.binding = function (name) {
 
 });
 
-require.define("url",function(require,module,exports,__dirname,__filename,process,global){var punycode = { encode : function (s) { return s } };
+require.define("/node_modules/voxel-hello-world/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
 
-exports.parse = urlParse;
-exports.resolve = urlResolve;
-exports.resolveObject = urlResolveObject;
-exports.format = urlFormat;
+require.define("/node_modules/voxel-hello-world/index.js",function(require,module,exports,__dirname,__filename,process,global){var createGame = require('voxel-engine')
+var voxel = require('voxel')
+var toolbar = require('toolbar')
+var skin = require('minecraft-skin')
+var debris = require('voxel-debris')
+var texturePath = require('painterly-textures')(__dirname)
+var blockSelector = toolbar({el: '#tools'})
 
-function arrayIndexOf(array, subject) {
-    for (var i = 0, j = array.length; i < j; i++) {
-        if(array[i] == subject) return i;
-    }
-    return -1;
-}
+var game = createGame({
+  generate: voxel.generator['Valley'],
+  startingPosition: [185, 100, 0],
+  texturePath: texturePath
+})
 
-var objectKeys = Object.keys || function objectKeys(object) {
-    if (object !== Object(object)) throw new TypeError('Invalid object');
-    var keys = [];
-    for (var key in object) if (object.hasOwnProperty(key)) keys[keys.length] = key;
-    return keys;
-}
+window.game = game // for debugging
 
-// Reference: RFC 3986, RFC 1808, RFC 2396
+var container = document.querySelector('#container')
 
-// define these here so at least they only have to be
-// compiled once on the first module load.
-var protocolPattern = /^([a-z0-9.+-]+:)/i,
-    portPattern = /:[0-9]+$/,
-    // RFC 2396: characters reserved for delimiting URLs.
-    delims = ['<', '>', '"', '`', ' ', '\r', '\n', '\t'],
-    // RFC 2396: characters not allowed for various reasons.
-    unwise = ['{', '}', '|', '\\', '^', '~', '[', ']', '`'].concat(delims),
-    // Allowed by RFCs, but cause of XSS attacks.  Always escape these.
-    autoEscape = ['\''],
-    // Characters that are never ever allowed in a hostname.
-    // Note that any invalid chars are also handled, but these
-    // are the ones that are *expected* to be seen, so we fast-path
-    // them.
-    nonHostChars = ['%', '/', '?', ';', '#']
-      .concat(unwise).concat(autoEscape),
-    nonAuthChars = ['/', '@', '?', '#'].concat(delims),
-    hostnameMaxLen = 255,
-    hostnamePartPattern = /^[a-zA-Z0-9][a-z0-9A-Z_-]{0,62}$/,
-    hostnamePartStart = /^([a-zA-Z0-9][a-z0-9A-Z_-]{0,62})(.*)$/,
-    // protocols that can allow "unsafe" and "unwise" chars.
-    unsafeProtocol = {
-      'javascript': true,
-      'javascript:': true
-    },
-    // protocols that never have a hostname.
-    hostlessProtocol = {
-      'javascript': true,
-      'javascript:': true
-    },
-    // protocols that always have a path component.
-    pathedProtocol = {
-      'http': true,
-      'https': true,
-      'ftp': true,
-      'gopher': true,
-      'file': true,
-      'http:': true,
-      'ftp:': true,
-      'gopher:': true,
-      'file:': true
-    },
-    // protocols that always contain a // bit.
-    slashedProtocol = {
-      'http': true,
-      'https': true,
-      'ftp': true,
-      'gopher': true,
-      'file': true,
-      'http:': true,
-      'https:': true,
-      'ftp:': true,
-      'gopher:': true,
-      'file:': true
-    },
-    querystring = require('querystring');
+game.appendTo(container)
 
-function urlParse(url, parseQueryString, slashesDenoteHost) {
-  if (url && typeof(url) === 'object' && url.href) return url;
+container.addEventListener('click', function() {
+  game.requestPointerLock(container)
+})
 
-  if (typeof url !== 'string') {
-    throw new TypeError("Parameter 'url' must be a string, not " + typeof url);
-  }
+// rotate camera left so it points at the characters
+game.controls.yawObject.rotation.y = 1.5
 
-  var out = {},
-      rest = url;
+var maxogden = skin(game.THREE, 'maxogden.png').createPlayerObject()
+maxogden.position.set(0, 62, 20)
+game.scene.add(maxogden)
 
-  // cut off any delimiters.
-  // This is to support parse stuff like "<http://foo.com>"
-  for (var i = 0, l = rest.length; i < l; i++) {
-    if (arrayIndexOf(delims, rest.charAt(i)) === -1) break;
-  }
-  if (i !== 0) rest = rest.substr(i);
+var substack = skin(game.THREE, 'substack.png').createPlayerObject()
+substack.position.set(0, 62, -20)
+game.scene.add(substack)
 
+var currentMaterial = 1
 
-  var proto = protocolPattern.exec(rest);
-  if (proto) {
-    proto = proto[0];
-    var lowerProto = proto.toLowerCase();
-    out.protocol = lowerProto;
-    rest = rest.substr(proto.length);
-  }
-
-  // figure out if it's got a host
-  // user@server is *always* interpreted as a hostname, and url
-  // resolution will treat //foo/bar as host=foo,path=bar because that's
-  // how the browser resolves relative URLs.
-  if (slashesDenoteHost || proto || rest.match(/^\/\/[^@\/]+@[^@\/]+/)) {
-    var slashes = rest.substr(0, 2) === '//';
-    if (slashes && !(proto && hostlessProtocol[proto])) {
-      rest = rest.substr(2);
-      out.slashes = true;
+blockSelector.on('select', function(material) {
+  var idx = game.materials.indexOf(material)
+  if (idx === -1) {
+    for (var m = 0; m < game.materials.length; m++) {
+      if (typeof game.materials[m] === 'object' && game.materials[m][0] === material) idx = m
     }
   }
+  if (idx > -1) currentMaterial = idx + 1
+})
 
-  if (!hostlessProtocol[proto] &&
-      (slashes || (proto && !slashedProtocol[proto]))) {
-    // there's a hostname.
-    // the first instance of /, ?, ;, or # ends the host.
-    // don't enforce full RFC correctness, just be unstupid about it.
+var explode = debris(game, { power : 1.5, yield: 1 })
 
-    // If there is an @ in the hostname, then non-host chars *are* allowed
-    // to the left of the first @ sign, unless some non-auth character
-    // comes *before* the @-sign.
-    // URLs are obnoxious.
-    var atSign = arrayIndexOf(rest, '@');
-    if (atSign !== -1) {
-      // there *may be* an auth
-      var hasAuth = true;
-      for (var i = 0, l = nonAuthChars.length; i < l; i++) {
-        var index = arrayIndexOf(rest, nonAuthChars[i]);
-        if (index !== -1 && index < atSign) {
-          // not a valid auth.  Something like http://foo.com/bar@baz/
-          hasAuth = false;
-          break;
-        }
-      }
-      if (hasAuth) {
-        // pluck off the auth portion.
-        out.auth = rest.substr(0, atSign);
-        rest = rest.substr(atSign + 1);
-      }
-    }
+game.on('mousedown', function (pos) {
+  if (erase) explode(pos)
+  else game.createBlock(pos, currentMaterial)
+})
 
-    var firstNonHost = -1;
-    for (var i = 0, l = nonHostChars.length; i < l; i++) {
-      var index = arrayIndexOf(rest, nonHostChars[i]);
-      if (index !== -1 &&
-          (firstNonHost < 0 || index < firstNonHost)) firstNonHost = index;
-    }
-
-    if (firstNonHost !== -1) {
-      out.host = rest.substr(0, firstNonHost);
-      rest = rest.substr(firstNonHost);
-    } else {
-      out.host = rest;
-      rest = '';
-    }
-
-    // pull out port.
-    var p = parseHost(out.host);
-    var keys = objectKeys(p);
-    for (var i = 0, l = keys.length; i < l; i++) {
-      var key = keys[i];
-      out[key] = p[key];
-    }
-
-    // we've indicated that there is a hostname,
-    // so even if it's empty, it has to be present.
-    out.hostname = out.hostname || '';
-
-    // validate a little.
-    if (out.hostname.length > hostnameMaxLen) {
-      out.hostname = '';
-    } else {
-      var hostparts = out.hostname.split(/\./);
-      for (var i = 0, l = hostparts.length; i < l; i++) {
-        var part = hostparts[i];
-        if (!part) continue;
-        if (!part.match(hostnamePartPattern)) {
-          var newpart = '';
-          for (var j = 0, k = part.length; j < k; j++) {
-            if (part.charCodeAt(j) > 127) {
-              // we replace non-ASCII char with a temporary placeholder
-              // we need this to make sure size of hostname is not
-              // broken by replacing non-ASCII by nothing
-              newpart += 'x';
-            } else {
-              newpart += part[j];
-            }
-          }
-          // we test again with ASCII char only
-          if (!newpart.match(hostnamePartPattern)) {
-            var validParts = hostparts.slice(0, i);
-            var notHost = hostparts.slice(i + 1);
-            var bit = part.match(hostnamePartStart);
-            if (bit) {
-              validParts.push(bit[1]);
-              notHost.unshift(bit[2]);
-            }
-            if (notHost.length) {
-              rest = '/' + notHost.join('.') + rest;
-            }
-            out.hostname = validParts.join('.');
-            break;
-          }
-        }
-      }
-    }
-
-    // hostnames are always lower case.
-    out.hostname = out.hostname.toLowerCase();
-
-    // IDNA Support: Returns a puny coded representation of "domain".
-    // It only converts the part of the domain name that
-    // has non ASCII characters. I.e. it dosent matter if
-    // you call it with a domain that already is in ASCII.
-    var domainArray = out.hostname.split('.');
-    var newOut = [];
-    for (var i = 0; i < domainArray.length; ++i) {
-      var s = domainArray[i];
-      newOut.push(s.match(/[^A-Za-z0-9_-]/) ?
-          'xn--' + punycode.encode(s) : s);
-    }
-    out.hostname = newOut.join('.');
-
-    out.host = (out.hostname || '') +
-        ((out.port) ? ':' + out.port : '');
-    out.href += out.host;
+var erase = true
+window.addEventListener('keydown', function (ev) {
+  if (ev.keyCode === 'X'.charCodeAt(0)) {
+    erase = !erase
   }
+})
 
-  // now rest is set to the post-host stuff.
-  // chop off any delim chars.
-  if (!unsafeProtocol[lowerProto]) {
+function ctrlToggle (ev) { erase = !ev.ctrlKey }
+window.addEventListener('keyup', ctrlToggle)
+window.addEventListener('keydown', ctrlToggle)
 
-    // First, make 100% sure that any "autoEscape" chars get
-    // escaped, even if encodeURIComponent doesn't think they
-    // need to be.
-    for (var i = 0, l = autoEscape.length; i < l; i++) {
-      var ae = autoEscape[i];
-      var esc = encodeURIComponent(ae);
-      if (esc === ae) {
-        esc = escape(ae);
-      }
-      rest = rest.split(ae).join(esc);
-    }
-
-    // Now make sure that delims never appear in a url.
-    var chop = rest.length;
-    for (var i = 0, l = delims.length; i < l; i++) {
-      var c = arrayIndexOf(rest, delims[i]);
-      if (c !== -1) {
-        chop = Math.min(c, chop);
-      }
-    }
-    rest = rest.substr(0, chop);
-  }
-
-
-  // chop off from the tail first.
-  var hash = arrayIndexOf(rest, '#');
-  if (hash !== -1) {
-    // got a fragment string.
-    out.hash = rest.substr(hash);
-    rest = rest.slice(0, hash);
-  }
-  var qm = arrayIndexOf(rest, '?');
-  if (qm !== -1) {
-    out.search = rest.substr(qm);
-    out.query = rest.substr(qm + 1);
-    if (parseQueryString) {
-      out.query = querystring.parse(out.query);
-    }
-    rest = rest.slice(0, qm);
-  } else if (parseQueryString) {
-    // no query string, but parseQueryString still requested
-    out.search = '';
-    out.query = {};
-  }
-  if (rest) out.pathname = rest;
-  if (slashedProtocol[proto] &&
-      out.hostname && !out.pathname) {
-    out.pathname = '/';
-  }
-
-  //to support http.request
-  if (out.pathname || out.search) {
-    out.path = (out.pathname ? out.pathname : '') +
-               (out.search ? out.search : '');
-  }
-
-  // finally, reconstruct the href based on what has been validated.
-  out.href = urlFormat(out);
-  return out;
-}
-
-// format a parsed object into a url string
-function urlFormat(obj) {
-  // ensure it's an object, and not a string url.
-  // If it's an obj, this is a no-op.
-  // this way, you can call url_format() on strings
-  // to clean up potentially wonky urls.
-  if (typeof(obj) === 'string') obj = urlParse(obj);
-
-  var auth = obj.auth || '';
-  if (auth) {
-    auth = auth.split('@').join('%40');
-    for (var i = 0, l = nonAuthChars.length; i < l; i++) {
-      var nAC = nonAuthChars[i];
-      auth = auth.split(nAC).join(encodeURIComponent(nAC));
-    }
-    auth += '@';
-  }
-
-  var protocol = obj.protocol || '',
-      host = (obj.host !== undefined) ? auth + obj.host :
-          obj.hostname !== undefined ? (
-              auth + obj.hostname +
-              (obj.port ? ':' + obj.port : '')
-          ) :
-          false,
-      pathname = obj.pathname || '',
-      query = obj.query &&
-              ((typeof obj.query === 'object' &&
-                objectKeys(obj.query).length) ?
-                 querystring.stringify(obj.query) :
-                 '') || '',
-      search = obj.search || (query && ('?' + query)) || '',
-      hash = obj.hash || '';
-
-  if (protocol && protocol.substr(-1) !== ':') protocol += ':';
-
-  // only the slashedProtocols get the //.  Not mailto:, xmpp:, etc.
-  // unless they had them to begin with.
-  if (obj.slashes ||
-      (!protocol || slashedProtocol[protocol]) && host !== false) {
-    host = '//' + (host || '');
-    if (pathname && pathname.charAt(0) !== '/') pathname = '/' + pathname;
-  } else if (!host) {
-    host = '';
-  }
-
-  if (hash && hash.charAt(0) !== '#') hash = '#' + hash;
-  if (search && search.charAt(0) !== '?') search = '?' + search;
-
-  return protocol + host + pathname + search + hash;
-}
-
-function urlResolve(source, relative) {
-  return urlFormat(urlResolveObject(source, relative));
-}
-
-function urlResolveObject(source, relative) {
-  if (!source) return relative;
-
-  source = urlParse(urlFormat(source), false, true);
-  relative = urlParse(urlFormat(relative), false, true);
-
-  // hash is always overridden, no matter what.
-  source.hash = relative.hash;
-
-  if (relative.href === '') {
-    source.href = urlFormat(source);
-    return source;
-  }
-
-  // hrefs like //foo/bar always cut to the protocol.
-  if (relative.slashes && !relative.protocol) {
-    relative.protocol = source.protocol;
-    //urlParse appends trailing / to urls like http://www.example.com
-    if (slashedProtocol[relative.protocol] &&
-        relative.hostname && !relative.pathname) {
-      relative.path = relative.pathname = '/';
-    }
-    relative.href = urlFormat(relative);
-    return relative;
-  }
-
-  if (relative.protocol && relative.protocol !== source.protocol) {
-    // if it's a known url protocol, then changing
-    // the protocol does weird things
-    // first, if it's not file:, then we MUST have a host,
-    // and if there was a path
-    // to begin with, then we MUST have a path.
-    // if it is file:, then the host is dropped,
-    // because that's known to be hostless.
-    // anything else is assumed to be absolute.
-    if (!slashedProtocol[relative.protocol]) {
-      relative.href = urlFormat(relative);
-      return relative;
-    }
-    source.protocol = relative.protocol;
-    if (!relative.host && !hostlessProtocol[relative.protocol]) {
-      var relPath = (relative.pathname || '').split('/');
-      while (relPath.length && !(relative.host = relPath.shift()));
-      if (!relative.host) relative.host = '';
-      if (!relative.hostname) relative.hostname = '';
-      if (relPath[0] !== '') relPath.unshift('');
-      if (relPath.length < 2) relPath.unshift('');
-      relative.pathname = relPath.join('/');
-    }
-    source.pathname = relative.pathname;
-    source.search = relative.search;
-    source.query = relative.query;
-    source.host = relative.host || '';
-    source.auth = relative.auth;
-    source.hostname = relative.hostname || relative.host;
-    source.port = relative.port;
-    //to support http.request
-    if (source.pathname !== undefined || source.search !== undefined) {
-      source.path = (source.pathname ? source.pathname : '') +
-                    (source.search ? source.search : '');
-    }
-    source.slashes = source.slashes || relative.slashes;
-    source.href = urlFormat(source);
-    return source;
-  }
-
-  var isSourceAbs = (source.pathname && source.pathname.charAt(0) === '/'),
-      isRelAbs = (
-          relative.host !== undefined ||
-          relative.pathname && relative.pathname.charAt(0) === '/'
-      ),
-      mustEndAbs = (isRelAbs || isSourceAbs ||
-                    (source.host && relative.pathname)),
-      removeAllDots = mustEndAbs,
-      srcPath = source.pathname && source.pathname.split('/') || [],
-      relPath = relative.pathname && relative.pathname.split('/') || [],
-      psychotic = source.protocol &&
-          !slashedProtocol[source.protocol];
-
-  // if the url is a non-slashed url, then relative
-  // links like ../.. should be able
-  // to crawl up to the hostname, as well.  This is strange.
-  // source.protocol has already been set by now.
-  // Later on, put the first path part into the host field.
-  if (psychotic) {
-
-    delete source.hostname;
-    delete source.port;
-    if (source.host) {
-      if (srcPath[0] === '') srcPath[0] = source.host;
-      else srcPath.unshift(source.host);
-    }
-    delete source.host;
-    if (relative.protocol) {
-      delete relative.hostname;
-      delete relative.port;
-      if (relative.host) {
-        if (relPath[0] === '') relPath[0] = relative.host;
-        else relPath.unshift(relative.host);
-      }
-      delete relative.host;
-    }
-    mustEndAbs = mustEndAbs && (relPath[0] === '' || srcPath[0] === '');
-  }
-
-  if (isRelAbs) {
-    // it's absolute.
-    source.host = (relative.host || relative.host === '') ?
-                      relative.host : source.host;
-    source.hostname = (relative.hostname || relative.hostname === '') ?
-                      relative.hostname : source.hostname;
-    source.search = relative.search;
-    source.query = relative.query;
-    srcPath = relPath;
-    // fall through to the dot-handling below.
-  } else if (relPath.length) {
-    // it's relative
-    // throw away the existing file, and take the new path instead.
-    if (!srcPath) srcPath = [];
-    srcPath.pop();
-    srcPath = srcPath.concat(relPath);
-    source.search = relative.search;
-    source.query = relative.query;
-  } else if ('search' in relative) {
-    // just pull out the search.
-    // like href='?foo'.
-    // Put this after the other two cases because it simplifies the booleans
-    if (psychotic) {
-      source.hostname = source.host = srcPath.shift();
-      //occationaly the auth can get stuck only in host
-      //this especialy happens in cases like
-      //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
-      var authInHost = source.host && arrayIndexOf(source.host, '@') > 0 ?
-                       source.host.split('@') : false;
-      if (authInHost) {
-        source.auth = authInHost.shift();
-        source.host = source.hostname = authInHost.shift();
-      }
-    }
-    source.search = relative.search;
-    source.query = relative.query;
-    //to support http.request
-    if (source.pathname !== undefined || source.search !== undefined) {
-      source.path = (source.pathname ? source.pathname : '') +
-                    (source.search ? source.search : '');
-    }
-    source.href = urlFormat(source);
-    return source;
-  }
-  if (!srcPath.length) {
-    // no path at all.  easy.
-    // we've already handled the other stuff above.
-    delete source.pathname;
-    //to support http.request
-    if (!source.search) {
-      source.path = '/' + source.search;
-    } else {
-      delete source.path;
-    }
-    source.href = urlFormat(source);
-    return source;
-  }
-  // if a url ENDs in . or .., then it must get a trailing slash.
-  // however, if it ends in anything else non-slashy,
-  // then it must NOT get a trailing slash.
-  var last = srcPath.slice(-1)[0];
-  var hasTrailingSlash = (
-      (source.host || relative.host) && (last === '.' || last === '..') ||
-      last === '');
-
-  // strip single dots, resolve double dots to parent dir
-  // if the path tries to go above the root, `up` ends up > 0
-  var up = 0;
-  for (var i = srcPath.length; i >= 0; i--) {
-    last = srcPath[i];
-    if (last == '.') {
-      srcPath.splice(i, 1);
-    } else if (last === '..') {
-      srcPath.splice(i, 1);
-      up++;
-    } else if (up) {
-      srcPath.splice(i, 1);
-      up--;
-    }
-  }
-
-  // if the path is allowed to go above the root, restore leading ..s
-  if (!mustEndAbs && !removeAllDots) {
-    for (; up--; up) {
-      srcPath.unshift('..');
-    }
-  }
-
-  if (mustEndAbs && srcPath[0] !== '' &&
-      (!srcPath[0] || srcPath[0].charAt(0) !== '/')) {
-    srcPath.unshift('');
-  }
-
-  if (hasTrailingSlash && (srcPath.join('/').substr(-1) !== '/')) {
-    srcPath.push('');
-  }
-
-  var isAbsolute = srcPath[0] === '' ||
-      (srcPath[0] && srcPath[0].charAt(0) === '/');
-
-  // put the host back
-  if (psychotic) {
-    source.hostname = source.host = isAbsolute ? '' :
-                                    srcPath.length ? srcPath.shift() : '';
-    //occationaly the auth can get stuck only in host
-    //this especialy happens in cases like
-    //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
-    var authInHost = source.host && arrayIndexOf(source.host, '@') > 0 ?
-                     source.host.split('@') : false;
-    if (authInHost) {
-      source.auth = authInHost.shift();
-      source.host = source.hostname = authInHost.shift();
-    }
-  }
-
-  mustEndAbs = mustEndAbs || (source.host && srcPath.length);
-
-  if (mustEndAbs && !isAbsolute) {
-    srcPath.unshift('');
-  }
-
-  source.pathname = srcPath.join('/');
-  //to support request.http
-  if (source.pathname !== undefined || source.search !== undefined) {
-    source.path = (source.pathname ? source.pathname : '') +
-                  (source.search ? source.search : '');
-  }
-  source.auth = relative.auth || source.auth;
-  source.slashes = source.slashes || relative.slashes;
-  source.href = urlFormat(source);
-  return source;
-}
-
-function parseHost(host) {
-  var out = {};
-  var port = portPattern.exec(host);
-  if (port) {
-    port = port[0];
-    out.port = port.substr(1);
-    host = host.substr(0, host.length - port.length);
-  }
-  if (host) out.hostname = host;
-  return out;
-}
+module.exports = game
 
 });
 
-require.define("querystring",function(require,module,exports,__dirname,__filename,process,global){var isArray = typeof Array.isArray === 'function'
-    ? Array.isArray
-    : function (xs) {
-        return Object.prototype.toString.call(xs) === '[object Array]'
-    };
-
-var objectKeys = Object.keys || function objectKeys(object) {
-    if (object !== Object(object)) throw new TypeError('Invalid object');
-    var keys = [];
-    for (var key in object) if (object.hasOwnProperty(key)) keys[keys.length] = key;
-    return keys;
-}
-
-
-/*!
- * querystring
- * Copyright(c) 2010 TJ Holowaychuk <tj@vision-media.ca>
- * MIT Licensed
- */
-
-/**
- * Library version.
- */
-
-exports.version = '0.3.1';
-
-/**
- * Object#toString() ref for stringify().
- */
-
-var toString = Object.prototype.toString;
-
-/**
- * Cache non-integer test regexp.
- */
-
-var notint = /[^0-9]/;
-
-/**
- * Parse the given query `str`, returning an object.
- *
- * @param {String} str
- * @return {Object}
- * @api public
- */
-
-exports.parse = function(str){
-  if (null == str || '' == str) return {};
-
-  function promote(parent, key) {
-    if (parent[key].length == 0) return parent[key] = {};
-    var t = {};
-    for (var i in parent[key]) t[i] = parent[key][i];
-    parent[key] = t;
-    return t;
-  }
-
-  return String(str)
-    .split('&')
-    .reduce(function(ret, pair){
-      try{ 
-        pair = decodeURIComponent(pair.replace(/\+/g, ' '));
-      } catch(e) {
-        // ignore
-      }
-
-      var eql = pair.indexOf('=')
-        , brace = lastBraceInKey(pair)
-        , key = pair.substr(0, brace || eql)
-        , val = pair.substr(brace || eql, pair.length)
-        , val = val.substr(val.indexOf('=') + 1, val.length)
-        , parent = ret;
-
-      // ?foo
-      if ('' == key) key = pair, val = '';
-
-      // nested
-      if (~key.indexOf(']')) {
-        var parts = key.split('[')
-          , len = parts.length
-          , last = len - 1;
-
-        function parse(parts, parent, key) {
-          var part = parts.shift();
-
-          // end
-          if (!part) {
-            if (isArray(parent[key])) {
-              parent[key].push(val);
-            } else if ('object' == typeof parent[key]) {
-              parent[key] = val;
-            } else if ('undefined' == typeof parent[key]) {
-              parent[key] = val;
-            } else {
-              parent[key] = [parent[key], val];
-            }
-          // array
-          } else {
-            obj = parent[key] = parent[key] || [];
-            if (']' == part) {
-              if (isArray(obj)) {
-                if ('' != val) obj.push(val);
-              } else if ('object' == typeof obj) {
-                obj[objectKeys(obj).length] = val;
-              } else {
-                obj = parent[key] = [parent[key], val];
-              }
-            // prop
-            } else if (~part.indexOf(']')) {
-              part = part.substr(0, part.length - 1);
-              if(notint.test(part) && isArray(obj)) obj = promote(parent, key);
-              parse(parts, obj, part);
-            // key
-            } else {
-              if(notint.test(part) && isArray(obj)) obj = promote(parent, key);
-              parse(parts, obj, part);
-            }
-          }
-        }
-
-        parse(parts, parent, 'base');
-      // optimize
-      } else {
-        if (notint.test(key) && isArray(parent.base)) {
-          var t = {};
-          for(var k in parent.base) t[k] = parent.base[k];
-          parent.base = t;
-        }
-        set(parent.base, key, val);
-      }
-
-      return ret;
-    }, {base: {}}).base;
-};
-
-/**
- * Turn the given `obj` into a query string
- *
- * @param {Object} obj
- * @return {String}
- * @api public
- */
-
-var stringify = exports.stringify = function(obj, prefix) {
-  if (isArray(obj)) {
-    return stringifyArray(obj, prefix);
-  } else if ('[object Object]' == toString.call(obj)) {
-    return stringifyObject(obj, prefix);
-  } else if ('string' == typeof obj) {
-    return stringifyString(obj, prefix);
-  } else {
-    return prefix;
-  }
-};
-
-/**
- * Stringify the given `str`.
- *
- * @param {String} str
- * @param {String} prefix
- * @return {String}
- * @api private
- */
-
-function stringifyString(str, prefix) {
-  if (!prefix) throw new TypeError('stringify expects an object');
-  return prefix + '=' + encodeURIComponent(str);
-}
-
-/**
- * Stringify the given `arr`.
- *
- * @param {Array} arr
- * @param {String} prefix
- * @return {String}
- * @api private
- */
-
-function stringifyArray(arr, prefix) {
-  var ret = [];
-  if (!prefix) throw new TypeError('stringify expects an object');
-  for (var i = 0; i < arr.length; i++) {
-    ret.push(stringify(arr[i], prefix + '[]'));
-  }
-  return ret.join('&');
-}
-
-/**
- * Stringify the given `obj`.
- *
- * @param {Object} obj
- * @param {String} prefix
- * @return {String}
- * @api private
- */
-
-function stringifyObject(obj, prefix) {
-  var ret = []
-    , keys = objectKeys(obj)
-    , key;
-  for (var i = 0, len = keys.length; i < len; ++i) {
-    key = keys[i];
-    ret.push(stringify(obj[key], prefix
-      ? prefix + '[' + encodeURIComponent(key) + ']'
-      : encodeURIComponent(key)));
-  }
-  return ret.join('&');
-}
-
-/**
- * Set `obj`'s `key` to `val` respecting
- * the weird and wonderful syntax of a qs,
- * where "foo=bar&foo=baz" becomes an array.
- *
- * @param {Object} obj
- * @param {String} key
- * @param {String} val
- * @api private
- */
-
-function set(obj, key, val) {
-  var v = obj[key];
-  if (undefined === v) {
-    obj[key] = val;
-  } else if (isArray(v)) {
-    v.push(val);
-  } else {
-    obj[key] = [v, val];
-  }
-}
-
-/**
- * Locate last brace in `str` within the key.
- *
- * @param {String} str
- * @return {Number}
- * @api private
- */
-
-function lastBraceInKey(str) {
-  var len = str.length
-    , brace
-    , c;
-  for (var i = 0; i < len; ++i) {
-    c = str[i];
-    if (']' == c) brace = false;
-    if ('[' == c) brace = true;
-    if ('=' == c && !brace) return i;
-  }
-}
-
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
 });
 
-require.define("/node_modules/voxel/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
-});
-
-require.define("/node_modules/voxel/index.js",function(require,module,exports,__dirname,__filename,process,global){var chunker = require('./chunker')
-
-module.exports = function(opts) {
-  if (!opts.generateVoxelChunk) opts.generateVoxelChunk = function(low, high) {
-    return generate(low, high, module.exports.generator['Valley'])
-  }
-  return chunker(opts)
-}
-
-module.exports.meshers = {
-  culled: require('./meshers/culled').mesher,
-  greedy: require('./meshers/greedy').mesher,
-  monotone: require('./meshers/monotone').mesher,
-  stupid: require('./meshers/stupid').mesher
-}
-
-module.exports.Chunker = chunker.Chunker
-module.exports.geometry = {}
-module.exports.generator = {}
-module.exports.generate = generate
-
-// from https://github.com/mikolalysenko/mikolalysenko.github.com/blob/master/MinecraftMeshes2/js/testdata.js#L4
-function generate(l, h, f) {
-  var d = [ h[0]-l[0], h[1]-l[1], h[2]-l[2] ]
-  var v = new Int8Array(d[0]*d[1]*d[2])
-  var n = 0
-  for(var k=l[2]; k<h[2]; ++k)
-  for(var j=l[1]; j<h[1]; ++j)
-  for(var i=l[0]; i<h[0]; ++i, ++n) {
-    v[n] = f(i,j,k,n)
-  }
-  return {voxels:v, dims:d}
-}
-
-// shape and terrain generator functions
-module.exports.generator['Sphere'] = function(i,j,k) {
-  return i*i+j*j+k*k <= 16*16 ? 1 : 0
-}
-
-module.exports.generator['Noise'] = function(i,j,k) {
-  return Math.random() < 0.1 ? Math.random() * 0xffffff : 0;
-}
-
-module.exports.generator['Dense Noise'] = function(i,j,k) {
-  return Math.round(Math.random() * 0xffffff);
-}
-
-module.exports.generator['Checker'] = function(i,j,k) {
-  return !!((i+j+k)&1) ? (((i^j^k)&2) ? 1 : 0xffffff) : 0;
-}
-
-module.exports.generator['Hill'] = function(i,j,k) {
-  return j <= 16 * Math.exp(-(i*i + k*k) / 64) ? 1 : 0;
-}
-
-module.exports.generator['Valley'] = function(i,j,k) {
-  return j <= (i*i + k*k) * 31 / (32*32*2) + 1 ? 1 : 0;
-}
-
-module.exports.generator['Hilly Terrain'] = function(i,j,k) {
-  var h0 = 3.0 * Math.sin(Math.PI * i / 12.0 - Math.PI * k * 0.1) + 27;    
-  if(j > h0+1) {
-    return 0;
-  }
-  if(h0 <= j) {
-    return 1;
-  }
-  var h1 = 2.0 * Math.sin(Math.PI * i * 0.25 - Math.PI * k * 0.3) + 20;
-  if(h1 <= j) {
-    return 2;
-  }
-  if(2 < j) {
-    return Math.random() < 0.1 ? 0x222222 : 0xaaaaaa;
-  }
-  return 3;
-}
-
-module.exports.scale = function ( x, fromLow, fromHigh, toLow, toHigh ) {
-  return ( x - fromLow ) * ( toHigh - toLow ) / ( fromHigh - fromLow ) + toLow
-}
-
-// convenience function that uses the above functions to prebake some simple voxel geometries
-module.exports.generateExamples = function() {
-  return {
-    'Sphere': generate([-16,-16,-16], [16,16,16], module.exports.generator['Sphere']),
-    'Noise': generate([0,0,0], [16,16,16], module.exports.generator['Noise']),
-    'Dense Noise': generate([0,0,0], [16,16,16], module.exports.generator['Dense Noise']),
-    'Checker': generate([0,0,0], [8,8,8], module.exports.generator['Checker']),
-    'Hill': generate([-16, 0, -16], [16,16,16], module.exports.generator['Hill']),
-    'Valley': generate([0,0,0], [32,32,32], module.exports.generator['Valley']),
-    'Hilly Terrain': generate([0, 0, 0], [32,32,32], module.exports.generator['Hilly Terrain'])
-  }
-}
-
-
-});
-
-require.define("/node_modules/voxel/chunker.js",function(require,module,exports,__dirname,__filename,process,global){var events = require('events')
-var inherits = require('inherits')
-
-module.exports = function(opts) {
-  return new Chunker(opts)
-}
-
-module.exports.Chunker = Chunker
-
-function Chunker(opts) {
-  this.distance = opts.chunkDistance || 2
-  this.chunkSize = opts.chunkSize || 32
-  this.cubeSize = opts.cubeSize || 25
-  this.generateVoxelChunk = opts.generateVoxelChunk
-  this.chunks = {}
-  this.meshes = {}
-}
-
-inherits(Chunker, events.EventEmitter)
-
-Chunker.prototype.nearbyChunks = function(position) {
-  var current = this.chunkAtPosition(position)
-  var x = current[0]
-  var y = current[1]
-  var z = current[2]
-  var dist = this.distance
-  var nearby = []
-  for (var cx = (x - dist); cx !== (x + dist); ++cx) {
-    for (var cy = (y - dist); cy !== (y + dist); ++cy) {
-      for (var cz = (z - dist); cz !== (z + dist); ++cz) {
-        nearby.push([cx, cy, cz])
-      }
-    }
-  }
-  return nearby
-}
-
-Chunker.prototype.requestMissingChunks = function(position) {
-  var self = this
-  this.nearbyChunks(position).map(function(chunk) {
-    if (!self.chunks[chunk.join('|')]) {
-      self.emit('missingChunk', chunk)
-    }
-  })
-}
-
-Chunker.prototype.getBounds = function(x, y, z) {
-  var size = this.chunkSize
-  var low = [x * size, y * size, z * size]
-  var high = [low[0] + size, low[1] + size, low[2] + size]
-  return [low, high]
-}
-
-Chunker.prototype.generateChunk = function(x, y, z) {
-  var self = this
-  var bounds = this.getBounds(x, y, z)
-  var chunk = this.generateVoxelChunk(bounds[0], bounds[1], x, y, z)
-  var position = [x, y, z]
-  chunk.position = position
-  this.chunks[position.join('|')] = chunk
-  return chunk
-}
-
-Chunker.prototype.chunkAtPosition = function(position) {
-  var chunkSize = this.chunkSize
-  var cubeSize = this.cubeSize
-  var cx = position.x / cubeSize / chunkSize
-  var cy = position.y / cubeSize / chunkSize
-  var cz = position.z / cubeSize / chunkSize
-  var chunkPos = [Math.floor(cx), Math.floor(cy), Math.floor(cz)]
-  return chunkPos
-};
-
-Chunker.prototype.voxelIndex = function(voxelVector) {
-  var size = this.chunkSize
-  var vidx = voxelVector.x + voxelVector.y*size + voxelVector.z*size*size
-  return vidx
-}
-
-Chunker.prototype.voxelIndexFromPosition = function(pos) {
-  var v = this.voxelVector(pos)
-  return this.voxelIndex(v)
-}
-
-Chunker.prototype.voxelAtPosition = function(pos, val) {
-  var ckey = this.chunkAtPosition(pos).join('|')
-  var chunk = this.chunks[ckey]
-  if (!chunk) return false
-  var vector = this.voxelVector(pos)
-  var vidx = this.voxelIndex(vector)
-  if (!vidx && vidx !== 0) return false
-  if (typeof val !== 'undefined') {
-    chunk.voxels[vidx] = val
-  }
-  var v = chunk.voxels[vidx]
-  return v
-}
-
-Chunker.prototype.voxelVector = function(pos) {
-  var size = this.chunkSize
-  var cubeSize = this.cubeSize
-  var vx = (size + Math.floor(pos.x / cubeSize) % size) % size
-  var vy = (size + Math.floor(pos.y / cubeSize) % size) % size
-  var vz = (size + Math.floor(pos.z / cubeSize) % size) % size
-  return {x: Math.abs(vx), y: Math.abs(vy), z: Math.abs(vz)}
-};
-
-});
-
-require.define("events",function(require,module,exports,__dirname,__filename,process,global){if (!process.EventEmitter) process.EventEmitter = function () {};
-
-var EventEmitter = exports.EventEmitter = process.EventEmitter;
-var isArray = typeof Array.isArray === 'function'
-    ? Array.isArray
-    : function (xs) {
-        return Object.prototype.toString.call(xs) === '[object Array]'
-    }
-;
-function indexOf (xs, x) {
-    if (xs.indexOf) return xs.indexOf(x);
-    for (var i = 0; i < xs.length; i++) {
-        if (x === xs[i]) return i;
-    }
-    return -1;
-}
-
-// By default EventEmitters will print a warning if more than
-// 10 listeners are added to it. This is a useful default which
-// helps finding memory leaks.
-//
-// Obviously not all Emitters should be limited to 10. This function allows
-// that to be increased. Set to zero for unlimited.
-var defaultMaxListeners = 10;
-EventEmitter.prototype.setMaxListeners = function(n) {
-  if (!this._events) this._events = {};
-  this._events.maxListeners = n;
-};
-
-
-EventEmitter.prototype.emit = function(type) {
-  // If there is no 'error' event listener then throw.
-  if (type === 'error') {
-    if (!this._events || !this._events.error ||
-        (isArray(this._events.error) && !this._events.error.length))
-    {
-      if (arguments[1] instanceof Error) {
-        throw arguments[1]; // Unhandled 'error' event
-      } else {
-        throw new Error("Uncaught, unspecified 'error' event.");
-      }
-      return false;
-    }
-  }
-
-  if (!this._events) return false;
-  var handler = this._events[type];
-  if (!handler) return false;
-
-  if (typeof handler == 'function') {
-    switch (arguments.length) {
-      // fast cases
-      case 1:
-        handler.call(this);
-        break;
-      case 2:
-        handler.call(this, arguments[1]);
-        break;
-      case 3:
-        handler.call(this, arguments[1], arguments[2]);
-        break;
-      // slower
-      default:
-        var args = Array.prototype.slice.call(arguments, 1);
-        handler.apply(this, args);
-    }
-    return true;
-
-  } else if (isArray(handler)) {
-    var args = Array.prototype.slice.call(arguments, 1);
-
-    var listeners = handler.slice();
-    for (var i = 0, l = listeners.length; i < l; i++) {
-      listeners[i].apply(this, args);
-    }
-    return true;
-
-  } else {
-    return false;
-  }
-};
-
-// EventEmitter is defined in src/node_events.cc
-// EventEmitter.prototype.emit() is also defined there.
-EventEmitter.prototype.addListener = function(type, listener) {
-  if ('function' !== typeof listener) {
-    throw new Error('addListener only takes instances of Function');
-  }
-
-  if (!this._events) this._events = {};
-
-  // To avoid recursion in the case that type == "newListeners"! Before
-  // adding it to the listeners, first emit "newListeners".
-  this.emit('newListener', type, listener);
-
-  if (!this._events[type]) {
-    // Optimize the case of one listener. Don't need the extra array object.
-    this._events[type] = listener;
-  } else if (isArray(this._events[type])) {
-
-    // Check for listener leak
-    if (!this._events[type].warned) {
-      var m;
-      if (this._events.maxListeners !== undefined) {
-        m = this._events.maxListeners;
-      } else {
-        m = defaultMaxListeners;
-      }
-
-      if (m && m > 0 && this._events[type].length > m) {
-        this._events[type].warned = true;
-        console.error('(node) warning: possible EventEmitter memory ' +
-                      'leak detected. %d listeners added. ' +
-                      'Use emitter.setMaxListeners() to increase limit.',
-                      this._events[type].length);
-        console.trace();
-      }
-    }
-
-    // If we've already got an array, just append.
-    this._events[type].push(listener);
-  } else {
-    // Adding the second element, need to change to array.
-    this._events[type] = [this._events[type], listener];
-  }
-
-  return this;
-};
-
-EventEmitter.prototype.on = EventEmitter.prototype.addListener;
-
-EventEmitter.prototype.once = function(type, listener) {
-  var self = this;
-  self.on(type, function g() {
-    self.removeListener(type, g);
-    listener.apply(this, arguments);
-  });
-
-  return this;
-};
-
-EventEmitter.prototype.removeListener = function(type, listener) {
-  if ('function' !== typeof listener) {
-    throw new Error('removeListener only takes instances of Function');
-  }
-
-  // does not use listeners(), so no side effect of creating _events[type]
-  if (!this._events || !this._events[type]) return this;
-
-  var list = this._events[type];
-
-  if (isArray(list)) {
-    var i = indexOf(list, listener);
-    if (i < 0) return this;
-    list.splice(i, 1);
-    if (list.length == 0)
-      delete this._events[type];
-  } else if (this._events[type] === listener) {
-    delete this._events[type];
-  }
-
-  return this;
-};
-
-EventEmitter.prototype.removeAllListeners = function(type) {
-  // does not use listeners(), so no side effect of creating _events[type]
-  if (type && this._events && this._events[type]) this._events[type] = null;
-  return this;
-};
-
-EventEmitter.prototype.listeners = function(type) {
-  if (!this._events) this._events = {};
-  if (!this._events[type]) this._events[type] = [];
-  if (!isArray(this._events[type])) {
-    this._events[type] = [this._events[type]];
-  }
-  return this._events[type];
-};
-
-});
-
-require.define("/node_modules/voxel/node_modules/inherits/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./inherits.js"}
-});
-
-require.define("/node_modules/voxel/node_modules/inherits/inherits.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = inherits
-
-function inherits (c, p, proto) {
-  proto = proto || {}
-  var e = {}
-  ;[c.prototype, proto].forEach(function (s) {
-    Object.getOwnPropertyNames(s).forEach(function (k) {
-      e[k] = Object.getOwnPropertyDescriptor(s, k)
-    })
-  })
-  c.prototype = Object.create(p.prototype, e)
-  c.super = p
-}
-
-//function Child () {
-//  Child.super.call(this)
-//  console.error([this
-//                ,this.constructor
-//                ,this.constructor === Child
-//                ,this.constructor.super === Parent
-//                ,Object.getPrototypeOf(this) === Child.prototype
-//                ,Object.getPrototypeOf(Object.getPrototypeOf(this))
-//                 === Parent.prototype
-//                ,this instanceof Child
-//                ,this instanceof Parent])
-//}
-//function Parent () {}
-//inherits(Child, Parent)
-//new Child
-
-});
-
-require.define("/node_modules/voxel/meshers/culled.js",function(require,module,exports,__dirname,__filename,process,global){//Naive meshing (with face culling)
-function CulledMesh(volume, dims) {
-  //Precalculate direction vectors for convenience
-  var dir = new Array(3);
-  for(var i=0; i<3; ++i) {
-    dir[i] = [[0,0,0], [0,0,0]];
-    dir[i][0][(i+1)%3] = 1;
-    dir[i][1][(i+2)%3] = 1;
-  }
-  //March over the volume
-  var vertices = []
-    , faces = []
-    , x = [0,0,0]
-    , B = [[false,true]    //Incrementally update bounds (this is a bit ugly)
-          ,[false,true]
-          ,[false,true]]
-    , n = -dims[0]*dims[1];
-  for(           B[2]=[false,true],x[2]=-1; x[2]<dims[2]; B[2]=[true,(++x[2]<dims[2]-1)])
-  for(n-=dims[0],B[1]=[false,true],x[1]=-1; x[1]<dims[1]; B[1]=[true,(++x[1]<dims[1]-1)])
-  for(n-=1,      B[0]=[false,true],x[0]=-1; x[0]<dims[0]; B[0]=[true,(++x[0]<dims[0]-1)], ++n) {
-    //Read current voxel and 3 neighboring voxels using bounds check results
-    var p =   (B[0][0] && B[1][0] && B[2][0]) ? volume[n]                 : 0
-      , b = [ (B[0][1] && B[1][0] && B[2][0]) ? volume[n+1]               : 0
-            , (B[0][0] && B[1][1] && B[2][0]) ? volume[n+dims[0]]         : 0
-            , (B[0][0] && B[1][0] && B[2][1]) ? volume[n+dims[0]*dims[1]] : 0
-          ];
-    //Generate faces
-    for(var d=0; d<3; ++d)
-    if((!!p) !== (!!b[d])) {
-      var s = !p ? 1 : 0;
-      var t = [x[0],x[1],x[2]]
-        , u = dir[d][s]
-        , v = dir[d][s^1];
-      ++t[d];
-      
-      var vertex_count = vertices.length;
-      vertices.push([t[0],           t[1],           t[2]          ]);
-      vertices.push([t[0]+u[0],      t[1]+u[1],      t[2]+u[2]     ]);
-      vertices.push([t[0]+u[0]+v[0], t[1]+u[1]+v[1], t[2]+u[2]+v[2]]);
-      vertices.push([t[0]     +v[0], t[1]     +v[1], t[2]     +v[2]]);
-      faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, s ? b[d] : p]);
-    }
-  }
-  return { vertices:vertices, faces:faces };
-}
-
-
-if(exports) {
-  exports.mesher = CulledMesh;
-}
-
-});
-
-require.define("/node_modules/voxel/meshers/greedy.js",function(require,module,exports,__dirname,__filename,process,global){var GreedyMesh = (function() {
-//Cache buffer internally
-var mask = new Int32Array(4096);
-
-return function(volume, dims) {
-  function f(i,j,k) {
-    return volume[i + dims[0] * (j + dims[1] * k)];
-  }
-  //Sweep over 3-axes
-  var vertices = [], faces = [];
-  for(var d=0; d<3; ++d) {
-    var i, j, k, l, w, h
-      , u = (d+1)%3
-      , v = (d+2)%3
-      , x = [0,0,0]
-      , q = [0,0,0];
-    if(mask.length < dims[u] * dims[v]) {
-      mask = new Int32Array(dims[u] * dims[v]);
-    }
-    q[d] = 1;
-    for(x[d]=-1; x[d]<dims[d]; ) {
-      //Compute mask
-      var n = 0;
-      for(x[v]=0; x[v]<dims[v]; ++x[v])
-      for(x[u]=0; x[u]<dims[u]; ++x[u], ++n) {
-        var a = (0    <= x[d]      ? f(x[0],      x[1],      x[2])      : 0)
-          , b = (x[d] <  dims[d]-1 ? f(x[0]+q[0], x[1]+q[1], x[2]+q[2]) : 0);
-        if((!!a) === (!!b) ) {
-          mask[n] = 0;
-        } else if(!!a) {
-          mask[n] = a;
-        } else {
-          mask[n] = -b;
-        }
-      }
-      //Increment x[d]
-      ++x[d];
-      //Generate mesh for mask using lexicographic ordering
-      n = 0;
-      for(j=0; j<dims[v]; ++j)
-      for(i=0; i<dims[u]; ) {
-        var c = mask[n];
-        if(!!c) {
-          //Compute width
-          for(w=1; c === mask[n+w] && i+w<dims[u]; ++w) {
-          }
-          //Compute height (this is slightly awkward
-          var done = false;
-          for(h=1; j+h<dims[v]; ++h) {
-            for(k=0; k<w; ++k) {
-              if(c !== mask[n+k+h*dims[u]]) {
-                done = true;
-                break;
-              }
-            }
-            if(done) {
-              break;
-            }
-          }
-          //Add quad
-          x[u] = i;  x[v] = j;
-          var du = [0,0,0]
-            , dv = [0,0,0]; 
-          if(c > 0) {
-            dv[v] = h;
-            du[u] = w;
-          } else {
-            c = -c;
-            du[v] = h;
-            dv[u] = w;
-          }
-          var vertex_count = vertices.length;
-          vertices.push([x[0],             x[1],             x[2]            ]);
-          vertices.push([x[0]+du[0],       x[1]+du[1],       x[2]+du[2]      ]);
-          vertices.push([x[0]+du[0]+dv[0], x[1]+du[1]+dv[1], x[2]+du[2]+dv[2]]);
-          vertices.push([x[0]      +dv[0], x[1]      +dv[1], x[2]      +dv[2]]);
-          faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, c]);
-          
-          //Zero-out mask
-          for(l=0; l<h; ++l)
-          for(k=0; k<w; ++k) {
-            mask[n+k+l*dims[u]] = 0;
-          }
-          //Increment counters and continue
-          i += w; n += w;
-        } else {
-          ++i;    ++n;
-        }
-      }
-    }
-  }
-  return { vertices:vertices, faces:faces };
-}
-})();
-
-if(exports) {
-  exports.mesher = GreedyMesh;
-}
-
-});
-
-require.define("/node_modules/voxel/meshers/monotone.js",function(require,module,exports,__dirname,__filename,process,global){"use strict";
-
-var MonotoneMesh = (function(){
-
-function MonotonePolygon(c, v, ul, ur) {
-  this.color  = c;
-  this.left   = [[ul, v]];
-  this.right  = [[ur, v]];
-};
-
-MonotonePolygon.prototype.close_off = function(v) {
-  this.left.push([ this.left[this.left.length-1][0], v ]);
-  this.right.push([ this.right[this.right.length-1][0], v ]);
-};
-
-MonotonePolygon.prototype.merge_run = function(v, u_l, u_r) {
-  var l = this.left[this.left.length-1][0]
-    , r = this.right[this.right.length-1][0]; 
-  if(l !== u_l) {
-    this.left.push([ l, v ]);
-    this.left.push([ u_l, v ]);
-  }
-  if(r !== u_r) {
-    this.right.push([ r, v ]);
-    this.right.push([ u_r, v ]);
-  }
-};
-
-
-return function(volume, dims) {
-  function f(i,j,k) {
-    return volume[i + dims[0] * (j + dims[1] * k)];
-  }
-  //Sweep over 3-axes
-  var vertices = [], faces = [];
-  for(var d=0; d<3; ++d) {
-    var i, j, k
-      , u = (d+1)%3   //u and v are orthogonal directions to d
-      , v = (d+2)%3
-      , x = new Int32Array(3)
-      , q = new Int32Array(3)
-      , runs = new Int32Array(2 * (dims[u]+1))
-      , frontier = new Int32Array(dims[u])  //Frontier is list of pointers to polygons
-      , next_frontier = new Int32Array(dims[u])
-      , left_index = new Int32Array(2 * dims[v])
-      , right_index = new Int32Array(2 * dims[v])
-      , stack = new Int32Array(24 * dims[v])
-      , delta = [[0,0], [0,0]];
-    //q points along d-direction
-    q[d] = 1;
-    //Initialize sentinel
-    for(x[d]=-1; x[d]<dims[d]; ) {
-      // --- Perform monotone polygon subdivision ---
-      var n = 0
-        , polygons = []
-        , nf = 0;
-      for(x[v]=0; x[v]<dims[v]; ++x[v]) {
-        //Make one pass over the u-scan line of the volume to run-length encode polygon
-        var nr = 0, p = 0, c = 0;
-        for(x[u]=0; x[u]<dims[u]; ++x[u], p = c) {
-          //Compute the type for this face
-          var a = (0    <= x[d]      ? f(x[0],      x[1],      x[2])      : 0)
-            , b = (x[d] <  dims[d]-1 ? f(x[0]+q[0], x[1]+q[1], x[2]+q[2]) : 0);
-          c = a;
-          if((!a) === (!b)) {
-            c = 0;
-          } else if(!a) {
-            c = -b;
-          }
-          //If cell type doesn't match, start a new run
-          if(p !== c) {
-            runs[nr++] = x[u];
-            runs[nr++] = c;
-          }
-        }
-        //Add sentinel run
-        runs[nr++] = dims[u];
-        runs[nr++] = 0;
-        //Update frontier by merging runs
-        var fp = 0;
-        for(var i=0, j=0; i<nf && j<nr-2; ) {
-          var p    = polygons[frontier[i]]
-            , p_l  = p.left[p.left.length-1][0]
-            , p_r  = p.right[p.right.length-1][0]
-            , p_c  = p.color
-            , r_l  = runs[j]    //Start of run
-            , r_r  = runs[j+2]  //End of run
-            , r_c  = runs[j+1]; //Color of run
-          //Check if we can merge run with polygon
-          if(r_r > p_l && p_r > r_l && r_c === p_c) {
-            //Merge run
-            p.merge_run(x[v], r_l, r_r);
-            //Insert polygon into frontier
-            next_frontier[fp++] = frontier[i];
-            ++i;
-            j += 2;
-          } else {
-            //Check if we need to advance the run pointer
-            if(r_r <= p_r) {
-              if(!!r_c) {
-                var n_poly = new MonotonePolygon(r_c, x[v], r_l, r_r);
-                next_frontier[fp++] = polygons.length;
-                polygons.push(n_poly);
-              }
-              j += 2;
-            }
-            //Check if we need to advance the frontier pointer
-            if(p_r <= r_r) {
-              p.close_off(x[v]);
-              ++i;
-            }
-          }
-        }
-        //Close off any residual polygons
-        for(; i<nf; ++i) {
-          polygons[frontier[i]].close_off(x[v]);
-        }
-        //Add any extra runs to frontier
-        for(; j<nr-2; j+=2) {
-          var r_l  = runs[j]
-            , r_r  = runs[j+2]
-            , r_c  = runs[j+1];
-          if(!!r_c) {
-            var n_poly = new MonotonePolygon(r_c, x[v], r_l, r_r);
-            next_frontier[fp++] = polygons.length;
-            polygons.push(n_poly);
-          }
-        }
-        //Swap frontiers
-        var tmp = next_frontier;
-        next_frontier = frontier;
-        frontier = tmp;
-        nf = fp;
-      }
-      //Close off frontier
-      for(var i=0; i<nf; ++i) {
-        var p = polygons[frontier[i]];
-        p.close_off(dims[v]);
-      }
-      // --- Monotone subdivision of polygon is complete at this point ---
-      
-      x[d]++;
-      
-      //Now we just need to triangulate each monotone polygon
-      for(var i=0; i<polygons.length; ++i) {
-        var p = polygons[i]
-          , c = p.color
-          , flipped = false;
-        if(c < 0) {
-          flipped = true;
-          c = -c;
-        }
-        for(var j=0; j<p.left.length; ++j) {
-          left_index[j] = vertices.length;
-          var y = [0.0,0.0,0.0]
-            , z = p.left[j];
-          y[d] = x[d];
-          y[u] = z[0];
-          y[v] = z[1];
-          vertices.push(y);
-        }
-        for(var j=0; j<p.right.length; ++j) {
-          right_index[j] = vertices.length;
-          var y = [0.0,0.0,0.0]
-            , z = p.right[j];
-          y[d] = x[d];
-          y[u] = z[0];
-          y[v] = z[1];
-          vertices.push(y);
-        }
-        //Triangulate the monotone polygon
-        var bottom = 0
-          , top = 0
-          , l_i = 1
-          , r_i = 1
-          , side = true;  //true = right, false = left
-        
-        stack[top++] = left_index[0];
-        stack[top++] = p.left[0][0];
-        stack[top++] = p.left[0][1];
-        
-        stack[top++] = right_index[0];
-        stack[top++] = p.right[0][0];
-        stack[top++] = p.right[0][1];
-        
-        while(l_i < p.left.length || r_i < p.right.length) {
-          //Compute next side
-          var n_side = false;
-          if(l_i === p.left.length) {
-            n_side = true;
-          } else if(r_i !== p.right.length) {
-            var l = p.left[l_i]
-              , r = p.right[r_i];
-            n_side = l[1] > r[1];
-          }
-          var idx = n_side ? right_index[r_i] : left_index[l_i]
-            , vert = n_side ? p.right[r_i] : p.left[l_i];
-          if(n_side !== side) {
-            //Opposite side
-            while(bottom+3 < top) {
-              if(flipped === n_side) {
-                faces.push([ stack[bottom], stack[bottom+3], idx, c]);
-              } else {
-                faces.push([ stack[bottom+3], stack[bottom], idx, c]);              
-              }
-              bottom += 3;
-            }
-          } else {
-            //Same side
-            while(bottom+3 < top) {
-              //Compute convexity
-              for(var j=0; j<2; ++j)
-              for(var k=0; k<2; ++k) {
-                delta[j][k] = stack[top-3*(j+1)+k+1] - vert[k];
-              }
-              var det = delta[0][0] * delta[1][1] - delta[1][0] * delta[0][1];
-              if(n_side === (det > 0)) {
-                break;
-              }
-              if(det !== 0) {
-                if(flipped === n_side) {
-                  faces.push([ stack[top-3], stack[top-6], idx, c ]);
-                } else {
-                  faces.push([ stack[top-6], stack[top-3], idx, c ]);
-                }
-              }
-              top -= 3;
-            }
-          }
-          //Push vertex
-          stack[top++] = idx;
-          stack[top++] = vert[0];
-          stack[top++] = vert[1];
-          //Update loop index
-          if(n_side) {
-            ++r_i;
-          } else {
-            ++l_i;
-          }
-          side = n_side;
-        }
-      }
-    }
-  }
-  return { vertices:vertices, faces:faces };
-}
-})();
-
-if(exports) {
-  exports.mesher = MonotoneMesh;
-}
-
-});
-
-require.define("/node_modules/voxel/meshers/stupid.js",function(require,module,exports,__dirname,__filename,process,global){//The stupidest possible way to generate a Minecraft mesh (I think)
-function StupidMesh(volume, dims) {
-  var vertices = [], faces = [], x = [0,0,0], n = 0;
-  for(x[2]=0; x[2]<dims[2]; ++x[2])
-  for(x[1]=0; x[1]<dims[1]; ++x[1])
-  for(x[0]=0; x[0]<dims[0]; ++x[0], ++n)
-  if(!!volume[n]) {
-    for(var d=0; d<3; ++d) {
-      var t = [x[0], x[1], x[2]]
-        , u = [0,0,0]
-        , v = [0,0,0];
-      u[(d+1)%3] = 1;
-      v[(d+2)%3] = 1;
-      for(var s=0; s<2; ++s) {
-        t[d] = x[d] + s;
-        var tmp = u;
-        u = v;
-        v = tmp;
-        var vertex_count = vertices.length;
-        vertices.push([t[0],           t[1],           t[2]          ]);
-        vertices.push([t[0]+u[0],      t[1]+u[1],      t[2]+u[2]     ]);
-        vertices.push([t[0]+u[0]+v[0], t[1]+u[1]+v[1], t[2]+u[2]+v[2]]);
-        vertices.push([t[0]     +v[0], t[1]     +v[1], t[2]     +v[2]]);
-        faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, volume[n]]);
-      }
-    }
-  }
-  return { vertices:vertices, faces:faces };
-}
-
-
-if(exports) {
-  exports.mesher = StupidMesh;
-}
-
-});
-
-require.define("/node_modules/websocket-stream/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/websocket-stream/index.js",function(require,module,exports,__dirname,__filename,process,global){var stream = require('stream')
-var util = require('util')
-
-function WebsocketStream(server, protocol) {
-  var self = this
-  stream.Stream.call(this)
-  this.readable = true
-  this.writable = true
-  if (typeof server === "object") {
-    this.ws = server
-    this.ws.on('message', this.onMessage.bind(this))
-    this.ws.on('error', this.onError.bind(this))
-    this.ws.on('close', this.onClose.bind(this))
-    this.ws.on('open', function() {
-      self.emit('open')
-    })
-  } else {
-    this.ws = new WebSocket(server, protocol)
-    this.ws.onmessage = this.onMessage.bind(this)
-    this.ws.onerror = this.onError.bind(this)
-    this.ws.onclose = this.onClose.bind(this)
-  }
-}
-
-util.inherits(WebsocketStream, stream.Stream)
-
-module.exports = function(server, protocol) {
-  return new WebsocketStream(server, protocol)
-}
-
-module.exports.WebsocketStream = WebsocketStream
-
-WebsocketStream.prototype.onMessage = function(e, flags) {
-  if (e.data) return this.emit('data', e.data, flags)
-  this.emit('data', e, flags)
-}
-
-WebsocketStream.prototype.onError = function(err) {
-  this.emit('error', err)
-}
-
-WebsocketStream.prototype.onClose = function(err) {
-  this.emit('end')
-}
-
-WebsocketStream.prototype.write = function(data, options) {
-  return this.ws.send(data, options)
-}
-
-WebsocketStream.prototype.end = function() {
-  this.ws.close()
-}
-
-});
-
-require.define("stream",function(require,module,exports,__dirname,__filename,process,global){var events = require('events');
-var util = require('util');
-
-function Stream() {
-  events.EventEmitter.call(this);
-}
-util.inherits(Stream, events.EventEmitter);
-module.exports = Stream;
-// Backwards-compat with node 0.4.x
-Stream.Stream = Stream;
-
-Stream.prototype.pipe = function(dest, options) {
-  var source = this;
-
-  function ondata(chunk) {
-    if (dest.writable) {
-      if (false === dest.write(chunk) && source.pause) {
-        source.pause();
-      }
-    }
-  }
-
-  source.on('data', ondata);
-
-  function ondrain() {
-    if (source.readable && source.resume) {
-      source.resume();
-    }
-  }
-
-  dest.on('drain', ondrain);
-
-  // If the 'end' option is not supplied, dest.end() will be called when
-  // source gets the 'end' or 'close' events.  Only dest.end() once, and
-  // only when all sources have ended.
-  if (!dest._isStdio && (!options || options.end !== false)) {
-    dest._pipeCount = dest._pipeCount || 0;
-    dest._pipeCount++;
-
-    source.on('end', onend);
-    source.on('close', onclose);
-  }
-
-  var didOnEnd = false;
-  function onend() {
-    if (didOnEnd) return;
-    didOnEnd = true;
-
-    dest._pipeCount--;
-
-    // remove the listeners
-    cleanup();
-
-    if (dest._pipeCount > 0) {
-      // waiting for other incoming streams to end.
-      return;
-    }
-
-    dest.end();
-  }
-
-
-  function onclose() {
-    if (didOnEnd) return;
-    didOnEnd = true;
-
-    dest._pipeCount--;
-
-    // remove the listeners
-    cleanup();
-
-    if (dest._pipeCount > 0) {
-      // waiting for other incoming streams to end.
-      return;
-    }
-
-    dest.destroy();
-  }
-
-  // don't leave dangling pipes when there are errors.
-  function onerror(er) {
-    cleanup();
-    if (this.listeners('error').length === 0) {
-      throw er; // Unhandled stream error in pipe.
-    }
-  }
-
-  source.on('error', onerror);
-  dest.on('error', onerror);
-
-  // remove all the event listeners that were added.
-  function cleanup() {
-    source.removeListener('data', ondata);
-    dest.removeListener('drain', ondrain);
-
-    source.removeListener('end', onend);
-    source.removeListener('close', onclose);
-
-    source.removeListener('error', onerror);
-    dest.removeListener('error', onerror);
-
-    source.removeListener('end', cleanup);
-    source.removeListener('close', cleanup);
-
-    dest.removeListener('end', cleanup);
-    dest.removeListener('close', cleanup);
-  }
-
-  source.on('end', cleanup);
-  source.on('close', cleanup);
-
-  dest.on('end', cleanup);
-  dest.on('close', cleanup);
-
-  dest.emit('pipe', source);
-
-  // Allow for unix-like usage: A.pipe(B).pipe(C)
-  return dest;
-};
-
-});
-
-require.define("util",function(require,module,exports,__dirname,__filename,process,global){var events = require('events');
-
-exports.isArray = isArray;
-exports.isDate = function(obj){return Object.prototype.toString.call(obj) === '[object Date]'};
-exports.isRegExp = function(obj){return Object.prototype.toString.call(obj) === '[object RegExp]'};
-
-
-exports.print = function () {};
-exports.puts = function () {};
-exports.debug = function() {};
-
-exports.inspect = function(obj, showHidden, depth, colors) {
-  var seen = [];
-
-  var stylize = function(str, styleType) {
-    // http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
-    var styles =
-        { 'bold' : [1, 22],
-          'italic' : [3, 23],
-          'underline' : [4, 24],
-          'inverse' : [7, 27],
-          'white' : [37, 39],
-          'grey' : [90, 39],
-          'black' : [30, 39],
-          'blue' : [34, 39],
-          'cyan' : [36, 39],
-          'green' : [32, 39],
-          'magenta' : [35, 39],
-          'red' : [31, 39],
-          'yellow' : [33, 39] };
-
-    var style =
-        { 'special': 'cyan',
-          'number': 'blue',
-          'boolean': 'yellow',
-          'undefined': 'grey',
-          'null': 'bold',
-          'string': 'green',
-          'date': 'magenta',
-          // "name": intentionally not styling
-          'regexp': 'red' }[styleType];
-
-    if (style) {
-      return '\033[' + styles[style][0] + 'm' + str +
-             '\033[' + styles[style][1] + 'm';
-    } else {
-      return str;
-    }
-  };
-  if (! colors) {
-    stylize = function(str, styleType) { return str; };
-  }
-
-  function format(value, recurseTimes) {
-    // Provide a hook for user-specified inspect functions.
-    // Check that value is an object with an inspect function on it
-    if (value && typeof value.inspect === 'function' &&
-        // Filter out the util module, it's inspect function is special
-        value !== exports &&
-        // Also filter out any prototype objects using the circular check.
-        !(value.constructor && value.constructor.prototype === value)) {
-      return value.inspect(recurseTimes);
-    }
-
-    // Primitive types cannot have properties
-    switch (typeof value) {
-      case 'undefined':
-        return stylize('undefined', 'undefined');
-
-      case 'string':
-        var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
-                                                 .replace(/'/g, "\\'")
-                                                 .replace(/\\"/g, '"') + '\'';
-        return stylize(simple, 'string');
-
-      case 'number':
-        return stylize('' + value, 'number');
-
-      case 'boolean':
-        return stylize('' + value, 'boolean');
-    }
-    // For some reason typeof null is "object", so special case here.
-    if (value === null) {
-      return stylize('null', 'null');
-    }
-
-    // Look up the keys of the object.
-    var visible_keys = Object_keys(value);
-    var keys = showHidden ? Object_getOwnPropertyNames(value) : visible_keys;
-
-    // Functions without properties can be shortcutted.
-    if (typeof value === 'function' && keys.length === 0) {
-      if (isRegExp(value)) {
-        return stylize('' + value, 'regexp');
-      } else {
-        var name = value.name ? ': ' + value.name : '';
-        return stylize('[Function' + name + ']', 'special');
-      }
-    }
-
-    // Dates without properties can be shortcutted
-    if (isDate(value) && keys.length === 0) {
-      return stylize(value.toUTCString(), 'date');
-    }
-
-    var base, type, braces;
-    // Determine the object type
-    if (isArray(value)) {
-      type = 'Array';
-      braces = ['[', ']'];
-    } else {
-      type = 'Object';
-      braces = ['{', '}'];
-    }
-
-    // Make functions say that they are functions
-    if (typeof value === 'function') {
-      var n = value.name ? ': ' + value.name : '';
-      base = (isRegExp(value)) ? ' ' + value : ' [Function' + n + ']';
-    } else {
-      base = '';
-    }
-
-    // Make dates with properties first say the date
-    if (isDate(value)) {
-      base = ' ' + value.toUTCString();
-    }
-
-    if (keys.length === 0) {
-      return braces[0] + base + braces[1];
-    }
-
-    if (recurseTimes < 0) {
-      if (isRegExp(value)) {
-        return stylize('' + value, 'regexp');
-      } else {
-        return stylize('[Object]', 'special');
-      }
-    }
-
-    seen.push(value);
-
-    var output = keys.map(function(key) {
-      var name, str;
-      if (value.__lookupGetter__) {
-        if (value.__lookupGetter__(key)) {
-          if (value.__lookupSetter__(key)) {
-            str = stylize('[Getter/Setter]', 'special');
-          } else {
-            str = stylize('[Getter]', 'special');
-          }
-        } else {
-          if (value.__lookupSetter__(key)) {
-            str = stylize('[Setter]', 'special');
-          }
-        }
-      }
-      if (visible_keys.indexOf(key) < 0) {
-        name = '[' + key + ']';
-      }
-      if (!str) {
-        if (seen.indexOf(value[key]) < 0) {
-          if (recurseTimes === null) {
-            str = format(value[key]);
-          } else {
-            str = format(value[key], recurseTimes - 1);
-          }
-          if (str.indexOf('\n') > -1) {
-            if (isArray(value)) {
-              str = str.split('\n').map(function(line) {
-                return '  ' + line;
-              }).join('\n').substr(2);
-            } else {
-              str = '\n' + str.split('\n').map(function(line) {
-                return '   ' + line;
-              }).join('\n');
-            }
-          }
-        } else {
-          str = stylize('[Circular]', 'special');
-        }
-      }
-      if (typeof name === 'undefined') {
-        if (type === 'Array' && key.match(/^\d+$/)) {
-          return str;
-        }
-        name = JSON.stringify('' + key);
-        if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
-          name = name.substr(1, name.length - 2);
-          name = stylize(name, 'name');
-        } else {
-          name = name.replace(/'/g, "\\'")
-                     .replace(/\\"/g, '"')
-                     .replace(/(^"|"$)/g, "'");
-          name = stylize(name, 'string');
-        }
-      }
-
-      return name + ': ' + str;
-    });
-
-    seen.pop();
-
-    var numLinesEst = 0;
-    var length = output.reduce(function(prev, cur) {
-      numLinesEst++;
-      if (cur.indexOf('\n') >= 0) numLinesEst++;
-      return prev + cur.length + 1;
-    }, 0);
-
-    if (length > 50) {
-      output = braces[0] +
-               (base === '' ? '' : base + '\n ') +
-               ' ' +
-               output.join(',\n  ') +
-               ' ' +
-               braces[1];
-
-    } else {
-      output = braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
-    }
-
-    return output;
-  }
-  return format(obj, (typeof depth === 'undefined' ? 2 : depth));
-};
-
-
-function isArray(ar) {
-  return ar instanceof Array ||
-         Array.isArray(ar) ||
-         (ar && ar !== Object.prototype && isArray(ar.__proto__));
-}
-
-
-function isRegExp(re) {
-  return re instanceof RegExp ||
-    (typeof re === 'object' && Object.prototype.toString.call(re) === '[object RegExp]');
-}
-
-
-function isDate(d) {
-  if (d instanceof Date) return true;
-  if (typeof d !== 'object') return false;
-  var properties = Date.prototype && Object_getOwnPropertyNames(Date.prototype);
-  var proto = d.__proto__ && Object_getOwnPropertyNames(d.__proto__);
-  return JSON.stringify(proto) === JSON.stringify(properties);
-}
-
-function pad(n) {
-  return n < 10 ? '0' + n.toString(10) : n.toString(10);
-}
-
-var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
-              'Oct', 'Nov', 'Dec'];
-
-// 26 Feb 16:19:34
-function timestamp() {
-  var d = new Date();
-  var time = [pad(d.getHours()),
-              pad(d.getMinutes()),
-              pad(d.getSeconds())].join(':');
-  return [d.getDate(), months[d.getMonth()], time].join(' ');
-}
-
-exports.log = function (msg) {};
-
-exports.pump = null;
-
-var Object_keys = Object.keys || function (obj) {
-    var res = [];
-    for (var key in obj) res.push(key);
-    return res;
-};
-
-var Object_getOwnPropertyNames = Object.getOwnPropertyNames || function (obj) {
-    var res = [];
-    for (var key in obj) {
-        if (Object.hasOwnProperty.call(obj, key)) res.push(key);
-    }
-    return res;
-};
-
-var Object_create = Object.create || function (prototype, properties) {
-    // from es5-shim
-    var object;
-    if (prototype === null) {
-        object = { '__proto__' : null };
-    }
-    else {
-        if (typeof prototype !== 'object') {
-            throw new TypeError(
-                'typeof prototype[' + (typeof prototype) + '] != \'object\''
-            );
-        }
-        var Type = function () {};
-        Type.prototype = prototype;
-        object = new Type();
-        object.__proto__ = prototype;
-    }
-    if (typeof properties !== 'undefined' && Object.defineProperties) {
-        Object.defineProperties(object, properties);
-    }
-    return object;
-};
-
-exports.inherits = function(ctor, superCtor) {
-  ctor.super_ = superCtor;
-  ctor.prototype = Object_create(superCtor.prototype, {
-    constructor: {
-      value: ctor,
-      enumerable: false,
-      writable: true,
-      configurable: true
-    }
-  });
-};
-
-var formatRegExp = /%[sdj%]/g;
-exports.format = function(f) {
-  if (typeof f !== 'string') {
-    var objects = [];
-    for (var i = 0; i < arguments.length; i++) {
-      objects.push(exports.inspect(arguments[i]));
-    }
-    return objects.join(' ');
-  }
-
-  var i = 1;
-  var args = arguments;
-  var len = args.length;
-  var str = String(f).replace(formatRegExp, function(x) {
-    if (x === '%') return '%';
-    if (i >= len) return x;
-    switch (x) {
-      case '%s': return String(args[i++]);
-      case '%d': return Number(args[i++]);
-      case '%j': return JSON.stringify(args[i++]);
-      default:
-        return x;
-    }
-  });
-  for(var x = args[i]; i < len; x = args[++i]){
-    if (x === null || typeof x !== 'object') {
-      str += ' ' + x;
-    } else {
-      str += ' ' + exports.inspect(x);
-    }
-  }
-  return str;
-};
-
-});
-
-require.define("/node_modules/voxel-engine/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/voxel-engine/index.js",function(require,module,exports,__dirname,__filename,process,global){var voxel = require('voxel')
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/index.js",function(require,module,exports,__dirname,__filename,process,global){var voxel = require('voxel')
 var voxelMesh = require('voxel-mesh')
 var voxelChunks = require('voxel-chunks')
 var THREE = require('three')
@@ -3462,10 +1270,880 @@ function distance (a, b) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-mesh/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-mesh/index.js",function(require,module,exports,__dirname,__filename,process,global){var THREE = require('three')
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/index.js",function(require,module,exports,__dirname,__filename,process,global){var chunker = require('./chunker')
+
+module.exports = function(opts) {
+  if (!opts.generateVoxelChunk) opts.generateVoxelChunk = function(low, high) {
+    return generate(low, high, module.exports.generator['Valley'])
+  }
+  return chunker(opts)
+}
+
+module.exports.meshers = {
+  culled: require('./meshers/culled').mesher,
+  greedy: require('./meshers/greedy').mesher,
+  monotone: require('./meshers/monotone').mesher,
+  stupid: require('./meshers/stupid').mesher
+}
+
+module.exports.Chunker = chunker.Chunker
+module.exports.geometry = {}
+module.exports.generator = {}
+module.exports.generate = generate
+
+// from https://github.com/mikolalysenko/mikolalysenko.github.com/blob/master/MinecraftMeshes2/js/testdata.js#L4
+function generate(l, h, f) {
+  var d = [ h[0]-l[0], h[1]-l[1], h[2]-l[2] ]
+  var v = new Int8Array(d[0]*d[1]*d[2])
+  var n = 0
+  for(var k=l[2]; k<h[2]; ++k)
+  for(var j=l[1]; j<h[1]; ++j)
+  for(var i=l[0]; i<h[0]; ++i, ++n) {
+    v[n] = f(i,j,k,n)
+  }
+  return {voxels:v, dims:d}
+}
+
+// shape and terrain generator functions
+module.exports.generator['Sphere'] = function(i,j,k) {
+  return i*i+j*j+k*k <= 16*16 ? 1 : 0
+}
+
+module.exports.generator['Noise'] = function(i,j,k) {
+  return Math.random() < 0.1 ? Math.random() * 0xffffff : 0;
+}
+
+module.exports.generator['Dense Noise'] = function(i,j,k) {
+  return Math.round(Math.random() * 0xffffff);
+}
+
+module.exports.generator['Checker'] = function(i,j,k) {
+  return !!((i+j+k)&1) ? (((i^j^k)&2) ? 1 : 0xffffff) : 0;
+}
+
+module.exports.generator['Hill'] = function(i,j,k) {
+  return j <= 16 * Math.exp(-(i*i + k*k) / 64) ? 1 : 0;
+}
+
+module.exports.generator['Valley'] = function(i,j,k) {
+  return j <= (i*i + k*k) * 31 / (32*32*2) + 1 ? 1 : 0;
+}
+
+module.exports.generator['Hilly Terrain'] = function(i,j,k) {
+  var h0 = 3.0 * Math.sin(Math.PI * i / 12.0 - Math.PI * k * 0.1) + 27;    
+  if(j > h0+1) {
+    return 0;
+  }
+  if(h0 <= j) {
+    return 1;
+  }
+  var h1 = 2.0 * Math.sin(Math.PI * i * 0.25 - Math.PI * k * 0.3) + 20;
+  if(h1 <= j) {
+    return 2;
+  }
+  if(2 < j) {
+    return Math.random() < 0.1 ? 0x222222 : 0xaaaaaa;
+  }
+  return 3;
+}
+
+module.exports.scale = function ( x, fromLow, fromHigh, toLow, toHigh ) {
+  return ( x - fromLow ) * ( toHigh - toLow ) / ( fromHigh - fromLow ) + toLow
+}
+
+// convenience function that uses the above functions to prebake some simple voxel geometries
+module.exports.generateExamples = function() {
+  return {
+    'Sphere': generate([-16,-16,-16], [16,16,16], module.exports.generator['Sphere']),
+    'Noise': generate([0,0,0], [16,16,16], module.exports.generator['Noise']),
+    'Dense Noise': generate([0,0,0], [16,16,16], module.exports.generator['Dense Noise']),
+    'Checker': generate([0,0,0], [8,8,8], module.exports.generator['Checker']),
+    'Hill': generate([-16, 0, -16], [16,16,16], module.exports.generator['Hill']),
+    'Valley': generate([0,0,0], [32,32,32], module.exports.generator['Valley']),
+    'Hilly Terrain': generate([0, 0, 0], [32,32,32], module.exports.generator['Hilly Terrain'])
+  }
+}
+
+
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/chunker.js",function(require,module,exports,__dirname,__filename,process,global){var events = require('events')
+var inherits = require('inherits')
+
+module.exports = function(opts) {
+  return new Chunker(opts)
+}
+
+module.exports.Chunker = Chunker
+
+function Chunker(opts) {
+  this.distance = opts.chunkDistance || 2
+  this.chunkSize = opts.chunkSize || 32
+  this.cubeSize = opts.cubeSize || 25
+  this.generateVoxelChunk = opts.generateVoxelChunk
+  this.chunks = {}
+  this.meshes = {}
+}
+
+inherits(Chunker, events.EventEmitter)
+
+Chunker.prototype.nearbyChunks = function(position) {
+  var current = this.chunkAtPosition(position)
+  var x = current[0]
+  var y = current[1]
+  var z = current[2]
+  var dist = this.distance
+  var nearby = []
+  for (var cx = (x - dist); cx !== (x + dist); ++cx) {
+    for (var cy = (y - dist); cy !== (y + dist); ++cy) {
+      for (var cz = (z - dist); cz !== (z + dist); ++cz) {
+        nearby.push([cx, cy, cz])
+      }
+    }
+  }
+  return nearby
+}
+
+Chunker.prototype.requestMissingChunks = function(position) {
+  var self = this
+  this.nearbyChunks(position).map(function(chunk) {
+    if (!self.chunks[chunk.join('|')]) {
+      self.emit('missingChunk', chunk)
+    }
+  })
+}
+
+Chunker.prototype.getBounds = function(x, y, z) {
+  var size = this.chunkSize
+  var low = [x * size, y * size, z * size]
+  var high = [low[0] + size, low[1] + size, low[2] + size]
+  return [low, high]
+}
+
+Chunker.prototype.generateChunk = function(x, y, z) {
+  var self = this
+  var bounds = this.getBounds(x, y, z)
+  var chunk = this.generateVoxelChunk(bounds[0], bounds[1], x, y, z)
+  var position = [x, y, z]
+  chunk.position = position
+  this.chunks[position.join('|')] = chunk
+  return chunk
+}
+
+Chunker.prototype.chunkAtPosition = function(position) {
+  var chunkSize = this.chunkSize
+  var cubeSize = this.cubeSize
+  var cx = position.x / cubeSize / chunkSize
+  var cy = position.y / cubeSize / chunkSize
+  var cz = position.z / cubeSize / chunkSize
+  var chunkPos = [Math.floor(cx), Math.floor(cy), Math.floor(cz)]
+  return chunkPos
+};
+
+Chunker.prototype.voxelIndex = function(voxelVector) {
+  var size = this.chunkSize
+  var vidx = voxelVector.x + voxelVector.y*size + voxelVector.z*size*size
+  return vidx
+}
+
+Chunker.prototype.voxelIndexFromPosition = function(pos) {
+  var v = this.voxelVector(pos)
+  return this.voxelIndex(v)
+}
+
+Chunker.prototype.voxelAtPosition = function(pos, val) {
+  var ckey = this.chunkAtPosition(pos).join('|')
+  var chunk = this.chunks[ckey]
+  if (!chunk) return false
+  var vector = this.voxelVector(pos)
+  var vidx = this.voxelIndex(vector)
+  if (!vidx && vidx !== 0) return false
+  if (typeof val !== 'undefined') {
+    chunk.voxels[vidx] = val
+  }
+  var v = chunk.voxels[vidx]
+  return v
+}
+
+Chunker.prototype.voxelVector = function(pos) {
+  var size = this.chunkSize
+  var cubeSize = this.cubeSize
+  var vx = (size + Math.floor(pos.x / cubeSize) % size) % size
+  var vy = (size + Math.floor(pos.y / cubeSize) % size) % size
+  var vz = (size + Math.floor(pos.z / cubeSize) % size) % size
+  return {x: Math.abs(vx), y: Math.abs(vy), z: Math.abs(vz)}
+};
+
+});
+
+require.define("events",function(require,module,exports,__dirname,__filename,process,global){if (!process.EventEmitter) process.EventEmitter = function () {};
+
+var EventEmitter = exports.EventEmitter = process.EventEmitter;
+var isArray = typeof Array.isArray === 'function'
+    ? Array.isArray
+    : function (xs) {
+        return Object.prototype.toString.call(xs) === '[object Array]'
+    }
+;
+function indexOf (xs, x) {
+    if (xs.indexOf) return xs.indexOf(x);
+    for (var i = 0; i < xs.length; i++) {
+        if (x === xs[i]) return i;
+    }
+    return -1;
+}
+
+// By default EventEmitters will print a warning if more than
+// 10 listeners are added to it. This is a useful default which
+// helps finding memory leaks.
+//
+// Obviously not all Emitters should be limited to 10. This function allows
+// that to be increased. Set to zero for unlimited.
+var defaultMaxListeners = 10;
+EventEmitter.prototype.setMaxListeners = function(n) {
+  if (!this._events) this._events = {};
+  this._events.maxListeners = n;
+};
+
+
+EventEmitter.prototype.emit = function(type) {
+  // If there is no 'error' event listener then throw.
+  if (type === 'error') {
+    if (!this._events || !this._events.error ||
+        (isArray(this._events.error) && !this._events.error.length))
+    {
+      if (arguments[1] instanceof Error) {
+        throw arguments[1]; // Unhandled 'error' event
+      } else {
+        throw new Error("Uncaught, unspecified 'error' event.");
+      }
+      return false;
+    }
+  }
+
+  if (!this._events) return false;
+  var handler = this._events[type];
+  if (!handler) return false;
+
+  if (typeof handler == 'function') {
+    switch (arguments.length) {
+      // fast cases
+      case 1:
+        handler.call(this);
+        break;
+      case 2:
+        handler.call(this, arguments[1]);
+        break;
+      case 3:
+        handler.call(this, arguments[1], arguments[2]);
+        break;
+      // slower
+      default:
+        var args = Array.prototype.slice.call(arguments, 1);
+        handler.apply(this, args);
+    }
+    return true;
+
+  } else if (isArray(handler)) {
+    var args = Array.prototype.slice.call(arguments, 1);
+
+    var listeners = handler.slice();
+    for (var i = 0, l = listeners.length; i < l; i++) {
+      listeners[i].apply(this, args);
+    }
+    return true;
+
+  } else {
+    return false;
+  }
+};
+
+// EventEmitter is defined in src/node_events.cc
+// EventEmitter.prototype.emit() is also defined there.
+EventEmitter.prototype.addListener = function(type, listener) {
+  if ('function' !== typeof listener) {
+    throw new Error('addListener only takes instances of Function');
+  }
+
+  if (!this._events) this._events = {};
+
+  // To avoid recursion in the case that type == "newListeners"! Before
+  // adding it to the listeners, first emit "newListeners".
+  this.emit('newListener', type, listener);
+
+  if (!this._events[type]) {
+    // Optimize the case of one listener. Don't need the extra array object.
+    this._events[type] = listener;
+  } else if (isArray(this._events[type])) {
+
+    // Check for listener leak
+    if (!this._events[type].warned) {
+      var m;
+      if (this._events.maxListeners !== undefined) {
+        m = this._events.maxListeners;
+      } else {
+        m = defaultMaxListeners;
+      }
+
+      if (m && m > 0 && this._events[type].length > m) {
+        this._events[type].warned = true;
+        console.error('(node) warning: possible EventEmitter memory ' +
+                      'leak detected. %d listeners added. ' +
+                      'Use emitter.setMaxListeners() to increase limit.',
+                      this._events[type].length);
+        console.trace();
+      }
+    }
+
+    // If we've already got an array, just append.
+    this._events[type].push(listener);
+  } else {
+    // Adding the second element, need to change to array.
+    this._events[type] = [this._events[type], listener];
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.on = EventEmitter.prototype.addListener;
+
+EventEmitter.prototype.once = function(type, listener) {
+  var self = this;
+  self.on(type, function g() {
+    self.removeListener(type, g);
+    listener.apply(this, arguments);
+  });
+
+  return this;
+};
+
+EventEmitter.prototype.removeListener = function(type, listener) {
+  if ('function' !== typeof listener) {
+    throw new Error('removeListener only takes instances of Function');
+  }
+
+  // does not use listeners(), so no side effect of creating _events[type]
+  if (!this._events || !this._events[type]) return this;
+
+  var list = this._events[type];
+
+  if (isArray(list)) {
+    var i = indexOf(list, listener);
+    if (i < 0) return this;
+    list.splice(i, 1);
+    if (list.length == 0)
+      delete this._events[type];
+  } else if (this._events[type] === listener) {
+    delete this._events[type];
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.removeAllListeners = function(type) {
+  // does not use listeners(), so no side effect of creating _events[type]
+  if (type && this._events && this._events[type]) this._events[type] = null;
+  return this;
+};
+
+EventEmitter.prototype.listeners = function(type) {
+  if (!this._events) this._events = {};
+  if (!this._events[type]) this._events[type] = [];
+  if (!isArray(this._events[type])) {
+    this._events[type] = [this._events[type]];
+  }
+  return this._events[type];
+};
+
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/node_modules/inherits/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./inherits.js"}
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/node_modules/inherits/inherits.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = inherits
+
+function inherits (c, p, proto) {
+  proto = proto || {}
+  var e = {}
+  ;[c.prototype, proto].forEach(function (s) {
+    Object.getOwnPropertyNames(s).forEach(function (k) {
+      e[k] = Object.getOwnPropertyDescriptor(s, k)
+    })
+  })
+  c.prototype = Object.create(p.prototype, e)
+  c.super = p
+}
+
+//function Child () {
+//  Child.super.call(this)
+//  console.error([this
+//                ,this.constructor
+//                ,this.constructor === Child
+//                ,this.constructor.super === Parent
+//                ,Object.getPrototypeOf(this) === Child.prototype
+//                ,Object.getPrototypeOf(Object.getPrototypeOf(this))
+//                 === Parent.prototype
+//                ,this instanceof Child
+//                ,this instanceof Parent])
+//}
+//function Parent () {}
+//inherits(Child, Parent)
+//new Child
+
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/meshers/culled.js",function(require,module,exports,__dirname,__filename,process,global){//Naive meshing (with face culling)
+function CulledMesh(volume, dims) {
+  //Precalculate direction vectors for convenience
+  var dir = new Array(3);
+  for(var i=0; i<3; ++i) {
+    dir[i] = [[0,0,0], [0,0,0]];
+    dir[i][0][(i+1)%3] = 1;
+    dir[i][1][(i+2)%3] = 1;
+  }
+  //March over the volume
+  var vertices = []
+    , faces = []
+    , x = [0,0,0]
+    , B = [[false,true]    //Incrementally update bounds (this is a bit ugly)
+          ,[false,true]
+          ,[false,true]]
+    , n = -dims[0]*dims[1];
+  for(           B[2]=[false,true],x[2]=-1; x[2]<dims[2]; B[2]=[true,(++x[2]<dims[2]-1)])
+  for(n-=dims[0],B[1]=[false,true],x[1]=-1; x[1]<dims[1]; B[1]=[true,(++x[1]<dims[1]-1)])
+  for(n-=1,      B[0]=[false,true],x[0]=-1; x[0]<dims[0]; B[0]=[true,(++x[0]<dims[0]-1)], ++n) {
+    //Read current voxel and 3 neighboring voxels using bounds check results
+    var p =   (B[0][0] && B[1][0] && B[2][0]) ? volume[n]                 : 0
+      , b = [ (B[0][1] && B[1][0] && B[2][0]) ? volume[n+1]               : 0
+            , (B[0][0] && B[1][1] && B[2][0]) ? volume[n+dims[0]]         : 0
+            , (B[0][0] && B[1][0] && B[2][1]) ? volume[n+dims[0]*dims[1]] : 0
+          ];
+    //Generate faces
+    for(var d=0; d<3; ++d)
+    if((!!p) !== (!!b[d])) {
+      var s = !p ? 1 : 0;
+      var t = [x[0],x[1],x[2]]
+        , u = dir[d][s]
+        , v = dir[d][s^1];
+      ++t[d];
+      
+      var vertex_count = vertices.length;
+      vertices.push([t[0],           t[1],           t[2]          ]);
+      vertices.push([t[0]+u[0],      t[1]+u[1],      t[2]+u[2]     ]);
+      vertices.push([t[0]+u[0]+v[0], t[1]+u[1]+v[1], t[2]+u[2]+v[2]]);
+      vertices.push([t[0]     +v[0], t[1]     +v[1], t[2]     +v[2]]);
+      faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, s ? b[d] : p]);
+    }
+  }
+  return { vertices:vertices, faces:faces };
+}
+
+
+if(exports) {
+  exports.mesher = CulledMesh;
+}
+
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/meshers/greedy.js",function(require,module,exports,__dirname,__filename,process,global){var GreedyMesh = (function() {
+//Cache buffer internally
+var mask = new Int32Array(4096);
+
+return function(volume, dims) {
+  function f(i,j,k) {
+    return volume[i + dims[0] * (j + dims[1] * k)];
+  }
+  //Sweep over 3-axes
+  var vertices = [], faces = [];
+  for(var d=0; d<3; ++d) {
+    var i, j, k, l, w, h
+      , u = (d+1)%3
+      , v = (d+2)%3
+      , x = [0,0,0]
+      , q = [0,0,0];
+    if(mask.length < dims[u] * dims[v]) {
+      mask = new Int32Array(dims[u] * dims[v]);
+    }
+    q[d] = 1;
+    for(x[d]=-1; x[d]<dims[d]; ) {
+      //Compute mask
+      var n = 0;
+      for(x[v]=0; x[v]<dims[v]; ++x[v])
+      for(x[u]=0; x[u]<dims[u]; ++x[u], ++n) {
+        var a = (0    <= x[d]      ? f(x[0],      x[1],      x[2])      : 0)
+          , b = (x[d] <  dims[d]-1 ? f(x[0]+q[0], x[1]+q[1], x[2]+q[2]) : 0);
+        if((!!a) === (!!b) ) {
+          mask[n] = 0;
+        } else if(!!a) {
+          mask[n] = a;
+        } else {
+          mask[n] = -b;
+        }
+      }
+      //Increment x[d]
+      ++x[d];
+      //Generate mesh for mask using lexicographic ordering
+      n = 0;
+      for(j=0; j<dims[v]; ++j)
+      for(i=0; i<dims[u]; ) {
+        var c = mask[n];
+        if(!!c) {
+          //Compute width
+          for(w=1; c === mask[n+w] && i+w<dims[u]; ++w) {
+          }
+          //Compute height (this is slightly awkward
+          var done = false;
+          for(h=1; j+h<dims[v]; ++h) {
+            for(k=0; k<w; ++k) {
+              if(c !== mask[n+k+h*dims[u]]) {
+                done = true;
+                break;
+              }
+            }
+            if(done) {
+              break;
+            }
+          }
+          //Add quad
+          x[u] = i;  x[v] = j;
+          var du = [0,0,0]
+            , dv = [0,0,0]; 
+          if(c > 0) {
+            dv[v] = h;
+            du[u] = w;
+          } else {
+            c = -c;
+            du[v] = h;
+            dv[u] = w;
+          }
+          var vertex_count = vertices.length;
+          vertices.push([x[0],             x[1],             x[2]            ]);
+          vertices.push([x[0]+du[0],       x[1]+du[1],       x[2]+du[2]      ]);
+          vertices.push([x[0]+du[0]+dv[0], x[1]+du[1]+dv[1], x[2]+du[2]+dv[2]]);
+          vertices.push([x[0]      +dv[0], x[1]      +dv[1], x[2]      +dv[2]]);
+          faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, c]);
+          
+          //Zero-out mask
+          for(l=0; l<h; ++l)
+          for(k=0; k<w; ++k) {
+            mask[n+k+l*dims[u]] = 0;
+          }
+          //Increment counters and continue
+          i += w; n += w;
+        } else {
+          ++i;    ++n;
+        }
+      }
+    }
+  }
+  return { vertices:vertices, faces:faces };
+}
+})();
+
+if(exports) {
+  exports.mesher = GreedyMesh;
+}
+
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/meshers/monotone.js",function(require,module,exports,__dirname,__filename,process,global){"use strict";
+
+var MonotoneMesh = (function(){
+
+function MonotonePolygon(c, v, ul, ur) {
+  this.color  = c;
+  this.left   = [[ul, v]];
+  this.right  = [[ur, v]];
+};
+
+MonotonePolygon.prototype.close_off = function(v) {
+  this.left.push([ this.left[this.left.length-1][0], v ]);
+  this.right.push([ this.right[this.right.length-1][0], v ]);
+};
+
+MonotonePolygon.prototype.merge_run = function(v, u_l, u_r) {
+  var l = this.left[this.left.length-1][0]
+    , r = this.right[this.right.length-1][0]; 
+  if(l !== u_l) {
+    this.left.push([ l, v ]);
+    this.left.push([ u_l, v ]);
+  }
+  if(r !== u_r) {
+    this.right.push([ r, v ]);
+    this.right.push([ u_r, v ]);
+  }
+};
+
+
+return function(volume, dims) {
+  function f(i,j,k) {
+    return volume[i + dims[0] * (j + dims[1] * k)];
+  }
+  //Sweep over 3-axes
+  var vertices = [], faces = [];
+  for(var d=0; d<3; ++d) {
+    var i, j, k
+      , u = (d+1)%3   //u and v are orthogonal directions to d
+      , v = (d+2)%3
+      , x = new Int32Array(3)
+      , q = new Int32Array(3)
+      , runs = new Int32Array(2 * (dims[u]+1))
+      , frontier = new Int32Array(dims[u])  //Frontier is list of pointers to polygons
+      , next_frontier = new Int32Array(dims[u])
+      , left_index = new Int32Array(2 * dims[v])
+      , right_index = new Int32Array(2 * dims[v])
+      , stack = new Int32Array(24 * dims[v])
+      , delta = [[0,0], [0,0]];
+    //q points along d-direction
+    q[d] = 1;
+    //Initialize sentinel
+    for(x[d]=-1; x[d]<dims[d]; ) {
+      // --- Perform monotone polygon subdivision ---
+      var n = 0
+        , polygons = []
+        , nf = 0;
+      for(x[v]=0; x[v]<dims[v]; ++x[v]) {
+        //Make one pass over the u-scan line of the volume to run-length encode polygon
+        var nr = 0, p = 0, c = 0;
+        for(x[u]=0; x[u]<dims[u]; ++x[u], p = c) {
+          //Compute the type for this face
+          var a = (0    <= x[d]      ? f(x[0],      x[1],      x[2])      : 0)
+            , b = (x[d] <  dims[d]-1 ? f(x[0]+q[0], x[1]+q[1], x[2]+q[2]) : 0);
+          c = a;
+          if((!a) === (!b)) {
+            c = 0;
+          } else if(!a) {
+            c = -b;
+          }
+          //If cell type doesn't match, start a new run
+          if(p !== c) {
+            runs[nr++] = x[u];
+            runs[nr++] = c;
+          }
+        }
+        //Add sentinel run
+        runs[nr++] = dims[u];
+        runs[nr++] = 0;
+        //Update frontier by merging runs
+        var fp = 0;
+        for(var i=0, j=0; i<nf && j<nr-2; ) {
+          var p    = polygons[frontier[i]]
+            , p_l  = p.left[p.left.length-1][0]
+            , p_r  = p.right[p.right.length-1][0]
+            , p_c  = p.color
+            , r_l  = runs[j]    //Start of run
+            , r_r  = runs[j+2]  //End of run
+            , r_c  = runs[j+1]; //Color of run
+          //Check if we can merge run with polygon
+          if(r_r > p_l && p_r > r_l && r_c === p_c) {
+            //Merge run
+            p.merge_run(x[v], r_l, r_r);
+            //Insert polygon into frontier
+            next_frontier[fp++] = frontier[i];
+            ++i;
+            j += 2;
+          } else {
+            //Check if we need to advance the run pointer
+            if(r_r <= p_r) {
+              if(!!r_c) {
+                var n_poly = new MonotonePolygon(r_c, x[v], r_l, r_r);
+                next_frontier[fp++] = polygons.length;
+                polygons.push(n_poly);
+              }
+              j += 2;
+            }
+            //Check if we need to advance the frontier pointer
+            if(p_r <= r_r) {
+              p.close_off(x[v]);
+              ++i;
+            }
+          }
+        }
+        //Close off any residual polygons
+        for(; i<nf; ++i) {
+          polygons[frontier[i]].close_off(x[v]);
+        }
+        //Add any extra runs to frontier
+        for(; j<nr-2; j+=2) {
+          var r_l  = runs[j]
+            , r_r  = runs[j+2]
+            , r_c  = runs[j+1];
+          if(!!r_c) {
+            var n_poly = new MonotonePolygon(r_c, x[v], r_l, r_r);
+            next_frontier[fp++] = polygons.length;
+            polygons.push(n_poly);
+          }
+        }
+        //Swap frontiers
+        var tmp = next_frontier;
+        next_frontier = frontier;
+        frontier = tmp;
+        nf = fp;
+      }
+      //Close off frontier
+      for(var i=0; i<nf; ++i) {
+        var p = polygons[frontier[i]];
+        p.close_off(dims[v]);
+      }
+      // --- Monotone subdivision of polygon is complete at this point ---
+      
+      x[d]++;
+      
+      //Now we just need to triangulate each monotone polygon
+      for(var i=0; i<polygons.length; ++i) {
+        var p = polygons[i]
+          , c = p.color
+          , flipped = false;
+        if(c < 0) {
+          flipped = true;
+          c = -c;
+        }
+        for(var j=0; j<p.left.length; ++j) {
+          left_index[j] = vertices.length;
+          var y = [0.0,0.0,0.0]
+            , z = p.left[j];
+          y[d] = x[d];
+          y[u] = z[0];
+          y[v] = z[1];
+          vertices.push(y);
+        }
+        for(var j=0; j<p.right.length; ++j) {
+          right_index[j] = vertices.length;
+          var y = [0.0,0.0,0.0]
+            , z = p.right[j];
+          y[d] = x[d];
+          y[u] = z[0];
+          y[v] = z[1];
+          vertices.push(y);
+        }
+        //Triangulate the monotone polygon
+        var bottom = 0
+          , top = 0
+          , l_i = 1
+          , r_i = 1
+          , side = true;  //true = right, false = left
+        
+        stack[top++] = left_index[0];
+        stack[top++] = p.left[0][0];
+        stack[top++] = p.left[0][1];
+        
+        stack[top++] = right_index[0];
+        stack[top++] = p.right[0][0];
+        stack[top++] = p.right[0][1];
+        
+        while(l_i < p.left.length || r_i < p.right.length) {
+          //Compute next side
+          var n_side = false;
+          if(l_i === p.left.length) {
+            n_side = true;
+          } else if(r_i !== p.right.length) {
+            var l = p.left[l_i]
+              , r = p.right[r_i];
+            n_side = l[1] > r[1];
+          }
+          var idx = n_side ? right_index[r_i] : left_index[l_i]
+            , vert = n_side ? p.right[r_i] : p.left[l_i];
+          if(n_side !== side) {
+            //Opposite side
+            while(bottom+3 < top) {
+              if(flipped === n_side) {
+                faces.push([ stack[bottom], stack[bottom+3], idx, c]);
+              } else {
+                faces.push([ stack[bottom+3], stack[bottom], idx, c]);              
+              }
+              bottom += 3;
+            }
+          } else {
+            //Same side
+            while(bottom+3 < top) {
+              //Compute convexity
+              for(var j=0; j<2; ++j)
+              for(var k=0; k<2; ++k) {
+                delta[j][k] = stack[top-3*(j+1)+k+1] - vert[k];
+              }
+              var det = delta[0][0] * delta[1][1] - delta[1][0] * delta[0][1];
+              if(n_side === (det > 0)) {
+                break;
+              }
+              if(det !== 0) {
+                if(flipped === n_side) {
+                  faces.push([ stack[top-3], stack[top-6], idx, c ]);
+                } else {
+                  faces.push([ stack[top-6], stack[top-3], idx, c ]);
+                }
+              }
+              top -= 3;
+            }
+          }
+          //Push vertex
+          stack[top++] = idx;
+          stack[top++] = vert[0];
+          stack[top++] = vert[1];
+          //Update loop index
+          if(n_side) {
+            ++r_i;
+          } else {
+            ++l_i;
+          }
+          side = n_side;
+        }
+      }
+    }
+  }
+  return { vertices:vertices, faces:faces };
+}
+})();
+
+if(exports) {
+  exports.mesher = MonotoneMesh;
+}
+
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel/meshers/stupid.js",function(require,module,exports,__dirname,__filename,process,global){//The stupidest possible way to generate a Minecraft mesh (I think)
+function StupidMesh(volume, dims) {
+  var vertices = [], faces = [], x = [0,0,0], n = 0;
+  for(x[2]=0; x[2]<dims[2]; ++x[2])
+  for(x[1]=0; x[1]<dims[1]; ++x[1])
+  for(x[0]=0; x[0]<dims[0]; ++x[0], ++n)
+  if(!!volume[n]) {
+    for(var d=0; d<3; ++d) {
+      var t = [x[0], x[1], x[2]]
+        , u = [0,0,0]
+        , v = [0,0,0];
+      u[(d+1)%3] = 1;
+      v[(d+2)%3] = 1;
+      for(var s=0; s<2; ++s) {
+        t[d] = x[d] + s;
+        var tmp = u;
+        u = v;
+        v = tmp;
+        var vertex_count = vertices.length;
+        vertices.push([t[0],           t[1],           t[2]          ]);
+        vertices.push([t[0]+u[0],      t[1]+u[1],      t[2]+u[2]     ]);
+        vertices.push([t[0]+u[0]+v[0], t[1]+u[1]+v[1], t[2]+u[2]+v[2]]);
+        vertices.push([t[0]     +v[0], t[1]     +v[1], t[2]     +v[2]]);
+        faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, volume[n]]);
+      }
+    }
+  }
+  return { vertices:vertices, faces:faces };
+}
+
+
+if(exports) {
+  exports.mesher = StupidMesh;
+}
+
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-mesh/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-mesh/index.js",function(require,module,exports,__dirname,__filename,process,global){var THREE = require('three')
 
 module.exports = function(data, scaleFactor, mesher) {
   return new Mesh(data, scaleFactor, mesher)
@@ -3609,10 +2287,10 @@ Mesh.prototype.faceVertexUv = function(i) {
 
 });
 
-require.define("/node_modules/three/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./three.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/three/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./three.js"}
 });
 
-require.define("/node_modules/three/three.js",function(require,module,exports,__dirname,__filename,process,global){
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/three/three.js",function(require,module,exports,__dirname,__filename,process,global){
 var window = window || {};
 var self = self || {};
 /**
@@ -40103,10 +38781,10 @@ if (typeof exports !== 'undefined') {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-chunks/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-chunks/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-chunks/index.js",function(require,module,exports,__dirname,__filename,process,global){var voxel = require('voxel');
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-chunks/index.js",function(require,module,exports,__dirname,__filename,process,global){var voxel = require('voxel');
 var ChunkMatrix = require('./lib/chunk_matrix');
 var indexer = require('./lib/indexer');
 
@@ -40198,7 +38876,7 @@ Group.prototype.getIndex = function (pos) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-chunks/lib/chunk_matrix.js",function(require,module,exports,__dirname,__filename,process,global){var voxelMesh = require('voxel-mesh');
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-chunks/lib/chunk_matrix.js",function(require,module,exports,__dirname,__filename,process,global){var voxelMesh = require('voxel-mesh');
 var voxel = require('voxel');
 
 var EventEmitter = require('events').EventEmitter;
@@ -40320,10 +38998,10 @@ ChunkMatrix.prototype._update = function (ci) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/inherits/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./inherits.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/inherits/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./inherits.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/inherits/inherits.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = inherits
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/inherits/inherits.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = inherits
 
 function inherits (c, p, proto) {
   proto = proto || {}
@@ -40355,7 +39033,7 @@ function inherits (c, p, proto) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-chunks/lib/indexer.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = Indexer;
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-chunks/lib/indexer.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = Indexer;
 
 function Indexer (opts) {
     if (!(this instanceof Indexer)) return new Indexer(opts);
@@ -40387,7 +39065,7 @@ Indexer.prototype.voxel = function (pos) {
 
 });
 
-require.define("/node_modules/voxel-engine/lib/stats.js",function(require,module,exports,__dirname,__filename,process,global){/**
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/lib/stats.js",function(require,module,exports,__dirname,__filename,process,global){/**
  * @author mrdoob / http://mrdoob.com/
  */
 
@@ -40534,7 +39212,7 @@ var Stats = function () {
 module.exports = Stats
 });
 
-require.define("/node_modules/voxel-engine/lib/detector.js",function(require,module,exports,__dirname,__filename,process,global){/**
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/lib/detector.js",function(require,module,exports,__dirname,__filename,process,global){/**
  * @author alteredq / http://alteredqualia.com/
  * @author mr.doob / http://mrdoob.com/
  */
@@ -40596,10 +39274,10 @@ module.exports = function() {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/index.js",function(require,module,exports,__dirname,__filename,process,global){var lock = require('pointer-lock')
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/index.js",function(require,module,exports,__dirname,__filename,process,global){var lock = require('pointer-lock')
   , drag = require('drag-stream')
   , full = require('fullscreen')
 
@@ -40707,10 +39385,10 @@ function usedrag(el) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/pointer-lock/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/pointer-lock/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/pointer-lock/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = pointer
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/pointer-lock/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = pointer
 
 pointer.available = available
 
@@ -40875,10 +39553,486 @@ function shim(el) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("stream",function(require,module,exports,__dirname,__filename,process,global){var events = require('events');
+var util = require('util');
+
+function Stream() {
+  events.EventEmitter.call(this);
+}
+util.inherits(Stream, events.EventEmitter);
+module.exports = Stream;
+// Backwards-compat with node 0.4.x
+Stream.Stream = Stream;
+
+Stream.prototype.pipe = function(dest, options) {
+  var source = this;
+
+  function ondata(chunk) {
+    if (dest.writable) {
+      if (false === dest.write(chunk) && source.pause) {
+        source.pause();
+      }
+    }
+  }
+
+  source.on('data', ondata);
+
+  function ondrain() {
+    if (source.readable && source.resume) {
+      source.resume();
+    }
+  }
+
+  dest.on('drain', ondrain);
+
+  // If the 'end' option is not supplied, dest.end() will be called when
+  // source gets the 'end' or 'close' events.  Only dest.end() once, and
+  // only when all sources have ended.
+  if (!dest._isStdio && (!options || options.end !== false)) {
+    dest._pipeCount = dest._pipeCount || 0;
+    dest._pipeCount++;
+
+    source.on('end', onend);
+    source.on('close', onclose);
+  }
+
+  var didOnEnd = false;
+  function onend() {
+    if (didOnEnd) return;
+    didOnEnd = true;
+
+    dest._pipeCount--;
+
+    // remove the listeners
+    cleanup();
+
+    if (dest._pipeCount > 0) {
+      // waiting for other incoming streams to end.
+      return;
+    }
+
+    dest.end();
+  }
+
+
+  function onclose() {
+    if (didOnEnd) return;
+    didOnEnd = true;
+
+    dest._pipeCount--;
+
+    // remove the listeners
+    cleanup();
+
+    if (dest._pipeCount > 0) {
+      // waiting for other incoming streams to end.
+      return;
+    }
+
+    dest.destroy();
+  }
+
+  // don't leave dangling pipes when there are errors.
+  function onerror(er) {
+    cleanup();
+    if (this.listeners('error').length === 0) {
+      throw er; // Unhandled stream error in pipe.
+    }
+  }
+
+  source.on('error', onerror);
+  dest.on('error', onerror);
+
+  // remove all the event listeners that were added.
+  function cleanup() {
+    source.removeListener('data', ondata);
+    dest.removeListener('drain', ondrain);
+
+    source.removeListener('end', onend);
+    source.removeListener('close', onclose);
+
+    source.removeListener('error', onerror);
+    dest.removeListener('error', onerror);
+
+    source.removeListener('end', cleanup);
+    source.removeListener('close', cleanup);
+
+    dest.removeListener('end', cleanup);
+    dest.removeListener('close', cleanup);
+  }
+
+  source.on('end', cleanup);
+  source.on('close', cleanup);
+
+  dest.on('end', cleanup);
+  dest.on('close', cleanup);
+
+  dest.emit('pipe', source);
+
+  // Allow for unix-like usage: A.pipe(B).pipe(C)
+  return dest;
+};
+
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = dragstream
+require.define("util",function(require,module,exports,__dirname,__filename,process,global){var events = require('events');
+
+exports.isArray = isArray;
+exports.isDate = function(obj){return Object.prototype.toString.call(obj) === '[object Date]'};
+exports.isRegExp = function(obj){return Object.prototype.toString.call(obj) === '[object RegExp]'};
+
+
+exports.print = function () {};
+exports.puts = function () {};
+exports.debug = function() {};
+
+exports.inspect = function(obj, showHidden, depth, colors) {
+  var seen = [];
+
+  var stylize = function(str, styleType) {
+    // http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
+    var styles =
+        { 'bold' : [1, 22],
+          'italic' : [3, 23],
+          'underline' : [4, 24],
+          'inverse' : [7, 27],
+          'white' : [37, 39],
+          'grey' : [90, 39],
+          'black' : [30, 39],
+          'blue' : [34, 39],
+          'cyan' : [36, 39],
+          'green' : [32, 39],
+          'magenta' : [35, 39],
+          'red' : [31, 39],
+          'yellow' : [33, 39] };
+
+    var style =
+        { 'special': 'cyan',
+          'number': 'blue',
+          'boolean': 'yellow',
+          'undefined': 'grey',
+          'null': 'bold',
+          'string': 'green',
+          'date': 'magenta',
+          // "name": intentionally not styling
+          'regexp': 'red' }[styleType];
+
+    if (style) {
+      return '\033[' + styles[style][0] + 'm' + str +
+             '\033[' + styles[style][1] + 'm';
+    } else {
+      return str;
+    }
+  };
+  if (! colors) {
+    stylize = function(str, styleType) { return str; };
+  }
+
+  function format(value, recurseTimes) {
+    // Provide a hook for user-specified inspect functions.
+    // Check that value is an object with an inspect function on it
+    if (value && typeof value.inspect === 'function' &&
+        // Filter out the util module, it's inspect function is special
+        value !== exports &&
+        // Also filter out any prototype objects using the circular check.
+        !(value.constructor && value.constructor.prototype === value)) {
+      return value.inspect(recurseTimes);
+    }
+
+    // Primitive types cannot have properties
+    switch (typeof value) {
+      case 'undefined':
+        return stylize('undefined', 'undefined');
+
+      case 'string':
+        var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
+                                                 .replace(/'/g, "\\'")
+                                                 .replace(/\\"/g, '"') + '\'';
+        return stylize(simple, 'string');
+
+      case 'number':
+        return stylize('' + value, 'number');
+
+      case 'boolean':
+        return stylize('' + value, 'boolean');
+    }
+    // For some reason typeof null is "object", so special case here.
+    if (value === null) {
+      return stylize('null', 'null');
+    }
+
+    // Look up the keys of the object.
+    var visible_keys = Object_keys(value);
+    var keys = showHidden ? Object_getOwnPropertyNames(value) : visible_keys;
+
+    // Functions without properties can be shortcutted.
+    if (typeof value === 'function' && keys.length === 0) {
+      if (isRegExp(value)) {
+        return stylize('' + value, 'regexp');
+      } else {
+        var name = value.name ? ': ' + value.name : '';
+        return stylize('[Function' + name + ']', 'special');
+      }
+    }
+
+    // Dates without properties can be shortcutted
+    if (isDate(value) && keys.length === 0) {
+      return stylize(value.toUTCString(), 'date');
+    }
+
+    var base, type, braces;
+    // Determine the object type
+    if (isArray(value)) {
+      type = 'Array';
+      braces = ['[', ']'];
+    } else {
+      type = 'Object';
+      braces = ['{', '}'];
+    }
+
+    // Make functions say that they are functions
+    if (typeof value === 'function') {
+      var n = value.name ? ': ' + value.name : '';
+      base = (isRegExp(value)) ? ' ' + value : ' [Function' + n + ']';
+    } else {
+      base = '';
+    }
+
+    // Make dates with properties first say the date
+    if (isDate(value)) {
+      base = ' ' + value.toUTCString();
+    }
+
+    if (keys.length === 0) {
+      return braces[0] + base + braces[1];
+    }
+
+    if (recurseTimes < 0) {
+      if (isRegExp(value)) {
+        return stylize('' + value, 'regexp');
+      } else {
+        return stylize('[Object]', 'special');
+      }
+    }
+
+    seen.push(value);
+
+    var output = keys.map(function(key) {
+      var name, str;
+      if (value.__lookupGetter__) {
+        if (value.__lookupGetter__(key)) {
+          if (value.__lookupSetter__(key)) {
+            str = stylize('[Getter/Setter]', 'special');
+          } else {
+            str = stylize('[Getter]', 'special');
+          }
+        } else {
+          if (value.__lookupSetter__(key)) {
+            str = stylize('[Setter]', 'special');
+          }
+        }
+      }
+      if (visible_keys.indexOf(key) < 0) {
+        name = '[' + key + ']';
+      }
+      if (!str) {
+        if (seen.indexOf(value[key]) < 0) {
+          if (recurseTimes === null) {
+            str = format(value[key]);
+          } else {
+            str = format(value[key], recurseTimes - 1);
+          }
+          if (str.indexOf('\n') > -1) {
+            if (isArray(value)) {
+              str = str.split('\n').map(function(line) {
+                return '  ' + line;
+              }).join('\n').substr(2);
+            } else {
+              str = '\n' + str.split('\n').map(function(line) {
+                return '   ' + line;
+              }).join('\n');
+            }
+          }
+        } else {
+          str = stylize('[Circular]', 'special');
+        }
+      }
+      if (typeof name === 'undefined') {
+        if (type === 'Array' && key.match(/^\d+$/)) {
+          return str;
+        }
+        name = JSON.stringify('' + key);
+        if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
+          name = name.substr(1, name.length - 2);
+          name = stylize(name, 'name');
+        } else {
+          name = name.replace(/'/g, "\\'")
+                     .replace(/\\"/g, '"')
+                     .replace(/(^"|"$)/g, "'");
+          name = stylize(name, 'string');
+        }
+      }
+
+      return name + ': ' + str;
+    });
+
+    seen.pop();
+
+    var numLinesEst = 0;
+    var length = output.reduce(function(prev, cur) {
+      numLinesEst++;
+      if (cur.indexOf('\n') >= 0) numLinesEst++;
+      return prev + cur.length + 1;
+    }, 0);
+
+    if (length > 50) {
+      output = braces[0] +
+               (base === '' ? '' : base + '\n ') +
+               ' ' +
+               output.join(',\n  ') +
+               ' ' +
+               braces[1];
+
+    } else {
+      output = braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
+    }
+
+    return output;
+  }
+  return format(obj, (typeof depth === 'undefined' ? 2 : depth));
+};
+
+
+function isArray(ar) {
+  return ar instanceof Array ||
+         Array.isArray(ar) ||
+         (ar && ar !== Object.prototype && isArray(ar.__proto__));
+}
+
+
+function isRegExp(re) {
+  return re instanceof RegExp ||
+    (typeof re === 'object' && Object.prototype.toString.call(re) === '[object RegExp]');
+}
+
+
+function isDate(d) {
+  if (d instanceof Date) return true;
+  if (typeof d !== 'object') return false;
+  var properties = Date.prototype && Object_getOwnPropertyNames(Date.prototype);
+  var proto = d.__proto__ && Object_getOwnPropertyNames(d.__proto__);
+  return JSON.stringify(proto) === JSON.stringify(properties);
+}
+
+function pad(n) {
+  return n < 10 ? '0' + n.toString(10) : n.toString(10);
+}
+
+var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
+              'Oct', 'Nov', 'Dec'];
+
+// 26 Feb 16:19:34
+function timestamp() {
+  var d = new Date();
+  var time = [pad(d.getHours()),
+              pad(d.getMinutes()),
+              pad(d.getSeconds())].join(':');
+  return [d.getDate(), months[d.getMonth()], time].join(' ');
+}
+
+exports.log = function (msg) {};
+
+exports.pump = null;
+
+var Object_keys = Object.keys || function (obj) {
+    var res = [];
+    for (var key in obj) res.push(key);
+    return res;
+};
+
+var Object_getOwnPropertyNames = Object.getOwnPropertyNames || function (obj) {
+    var res = [];
+    for (var key in obj) {
+        if (Object.hasOwnProperty.call(obj, key)) res.push(key);
+    }
+    return res;
+};
+
+var Object_create = Object.create || function (prototype, properties) {
+    // from es5-shim
+    var object;
+    if (prototype === null) {
+        object = { '__proto__' : null };
+    }
+    else {
+        if (typeof prototype !== 'object') {
+            throw new TypeError(
+                'typeof prototype[' + (typeof prototype) + '] != \'object\''
+            );
+        }
+        var Type = function () {};
+        Type.prototype = prototype;
+        object = new Type();
+        object.__proto__ = prototype;
+    }
+    if (typeof properties !== 'undefined' && Object.defineProperties) {
+        Object.defineProperties(object, properties);
+    }
+    return object;
+};
+
+exports.inherits = function(ctor, superCtor) {
+  ctor.super_ = superCtor;
+  ctor.prototype = Object_create(superCtor.prototype, {
+    constructor: {
+      value: ctor,
+      enumerable: false,
+      writable: true,
+      configurable: true
+    }
+  });
+};
+
+var formatRegExp = /%[sdj%]/g;
+exports.format = function(f) {
+  if (typeof f !== 'string') {
+    var objects = [];
+    for (var i = 0; i < arguments.length; i++) {
+      objects.push(exports.inspect(arguments[i]));
+    }
+    return objects.join(' ');
+  }
+
+  var i = 1;
+  var args = arguments;
+  var len = args.length;
+  var str = String(f).replace(formatRegExp, function(x) {
+    if (x === '%') return '%';
+    if (i >= len) return x;
+    switch (x) {
+      case '%s': return String(args[i++]);
+      case '%d': return Number(args[i++]);
+      case '%j': return JSON.stringify(args[i++]);
+      default:
+        return x;
+    }
+  });
+  for(var x = args[i]; i < len; x = args[++i]){
+    if (x === null || typeof x !== 'object') {
+      str += ' ' + x;
+    } else {
+      str += ' ' + exports.inspect(x);
+    }
+  }
+  return str;
+};
+
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = dragstream
 
 var Stream = require('stream')
   , read = require('domnode-dom').createReadStream
@@ -40947,14 +40101,14 @@ function dragstream(el) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = require('./lib/index')
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = require('./lib/index')
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/lib/index.js",function(require,module,exports,__dirname,__filename,process,global){var WriteStream = require('./writable')
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/lib/index.js",function(require,module,exports,__dirname,__filename,process,global){var WriteStream = require('./writable')
   , ReadStream = require('./readable')
   , DOMStream = {}
 
@@ -40993,7 +40147,7 @@ module.exports = DOMStream
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/lib/writable.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = DOMStream
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/lib/writable.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = DOMStream
 
 var Stream = require('stream').Stream
 
@@ -41072,7 +40226,7 @@ proto.constructTextPlain = function(data) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/lib/readable.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = DOMStream
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/domnode-dom/lib/readable.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = DOMStream
 
 var Stream = require('stream').Stream
 
@@ -41182,10 +40336,10 @@ function valueFromElement(el) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/through/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/through/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/through/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/drag-stream/node_modules/through/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
 
 // through
 //
@@ -41286,10 +40440,10 @@ function through (write, end) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/fullscreen/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/fullscreen/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/interact/node_modules/fullscreen/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = fullscreen
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/interact/node_modules/fullscreen/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = fullscreen
 fullscreen.available = available
 
 var EE = require('events').EventEmitter
@@ -41381,10 +40535,10 @@ function shim(el) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/player-physics/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/player-physics/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/player-physics/index.js",function(require,module,exports,__dirname,__filename,process,global){var THREE = require('three')
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/player-physics/index.js",function(require,module,exports,__dirname,__filename,process,global){var THREE = require('three')
 var inherits = require('inherits')
 var stream = require('stream')
 
@@ -41510,10 +40664,10 @@ PlayerPhysics.prototype.tick = function (delta, cb) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/raf/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/raf/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/raf/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = raf
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/raf/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = raf
 
 var EE = require('events').EventEmitter
   , global = typeof window === 'undefined' ? this : window
@@ -41561,10 +40715,10 @@ raf.now = function() { return Date.now() }
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/collide-3d-tilemap/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/collide-3d-tilemap/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/collide-3d-tilemap/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = function(field, tilesize, dimensions, offset) {
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/collide-3d-tilemap/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = function(field, tilesize, dimensions, offset) {
   dimensions = dimensions || [ 
     Math.sqrt(field.length) >> 0
   , Math.sqrt(field.length) >> 0
@@ -41654,10 +40808,10 @@ require.define("/node_modules/voxel-engine/node_modules/collide-3d-tilemap/index
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/aabb-3d/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/aabb-3d/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/aabb-3d/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = AABB
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/aabb-3d/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = AABB
 
 var vec3 = require('gl-matrix').vec3
 
@@ -41757,10 +40911,10 @@ proto.union = function(aabb) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/aabb-3d/node_modules/gl-matrix/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"dist/gl-matrix.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/aabb-3d/node_modules/gl-matrix/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"dist/gl-matrix.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/aabb-3d/node_modules/gl-matrix/dist/gl-matrix.js",function(require,module,exports,__dirname,__filename,process,global){/**
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/aabb-3d/node_modules/gl-matrix/dist/gl-matrix.js",function(require,module,exports,__dirname,__filename,process,global){/**
  * @fileoverview gl-matrix - High performance matrix and vector operations
  * @author Brandon Jones
  * @author Colin MacKenzie IV
@@ -44834,10 +43988,10 @@ if(typeof(exports) !== 'undefined') {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/spatial-events/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/spatial-events/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/spatial-events/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = SpatialEventEmitter
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/spatial-events/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = SpatialEventEmitter
 
 var slice = [].slice
   , Tree = require('./tree')
@@ -44970,7 +44124,7 @@ function finite(bbox) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/spatial-events/tree.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = Tree
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/spatial-events/tree.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = Tree
 
 var aabb = require('aabb-3d')
 
@@ -45097,10 +44251,10 @@ proto.send = function(event, bbox, args) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-region-change/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-region-change/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-region-change/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = coordinates
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-region-change/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = coordinates
  
 var aabb = require('aabb-3d')
 var events = require('events')
@@ -45129,10 +44283,10 @@ function coordinates(spatial, box, regionWidth) {
 }
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-texture/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-texture/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-texture/index.js",function(require,module,exports,__dirname,__filename,process,global){function Texture(names, opts) {
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-texture/index.js",function(require,module,exports,__dirname,__filename,process,global){function Texture(names, opts) {
   if (!(this instanceof Texture)) return new Texture(names, opts);
   opts = opts || {};
   if (!isArray(name)) {
@@ -45253,10 +44407,10 @@ function isArray(ar) {
 
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-texture/node_modules/three/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./three.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-texture/node_modules/three/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./three.js"}
 });
 
-require.define("/node_modules/voxel-engine/node_modules/voxel-texture/node_modules/three/three.js",function(require,module,exports,__dirname,__filename,process,global){
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-engine/node_modules/voxel-texture/node_modules/three/three.js",function(require,module,exports,__dirname,__filename,process,global){
 var window = window || {};
 var self = self || {};
 /**
@@ -81063,139 +80217,421 @@ if (typeof exports !== 'undefined') {
 
 });
 
-require.define("/node_modules/player-physics/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+require.define("/node_modules/voxel-hello-world/node_modules/toolbar/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
 });
 
-require.define("/node_modules/player-physics/index.js",function(require,module,exports,__dirname,__filename,process,global){var THREE = require('three')
+require.define("/node_modules/voxel-hello-world/node_modules/toolbar/index.js",function(require,module,exports,__dirname,__filename,process,global){var keymaster = require('./lib/keymaster.js')
 var inherits = require('inherits')
-var stream = require('stream')
+var events = require('events')
 
-var PI_2 = Math.PI / 2
-
-/**
- * based on PointerLockControls by mrdoob / http://mrdoob.com/
- * converted to a module + stream by @maxogden and @substack
- */
-
-module.exports = function(camera, opts) {
-  return new PlayerPhysics(camera, opts)
+var keyTable =
+  {   8 : 'backspace'
+  ,   9 : 'tab'
+  ,  13 : 'enter'
+  ,  16 : 'shift'
+  ,  17 : 'ctrl'
+  ,  18 : 'alt'
+  ,  19 : 'pausebreak'
+  ,  20 : 'capslock'
+  ,  27 : 'esc'
+  ,  32 : 'spacebar'
+  ,  33 : 'pageup'
+  ,  34 : 'pagedown'
+  ,  35 : 'end'
+  ,  36 : 'home'
+  ,  37 : 'left'
+  ,  38 : 'up'
+  ,  39 : 'right'
+  ,  40 : 'down'
+  ,  45 : 'ins'
+  ,  46 : 'del'
+  ,  48 : '0'
+  ,  49 : '1'
+  ,  50 : '2'
+  ,  51 : '3'
+  ,  52 : '4'
+  ,  53 : '5'
+  ,  54 : '6'
+  ,  55 : '7'
+  ,  56 : '8'
+  ,  57 : '9'
+  ,  65 : 'a'
+  ,  66 : 'b'
+  ,  67 : 'c'
+  ,  68 : 'd'
+  ,  69 : 'e'
+  ,  70 : 'f'
+  ,  71 : 'g'
+  ,  72 : 'h'
+  ,  73 : 'i'
+  ,  74 : 'j'
+  ,  75 : 'k'
+  ,  76 : 'l'
+  ,  77 : 'm'
+  ,  78 : 'n'
+  ,  79 : 'o'
+  ,  80 : 'p'
+  ,  81 : 'q'
+  ,  82 : 'r'
+  ,  83 : 's'
+  ,  84 : 't'
+  ,  85 : 'u'
+  ,  86 : 'v'
+  ,  87 : 'w'
+  ,  88 : 'x'
+  ,  89 : 'y'
+  ,  90 : 'z'
+  ,  93 : 'select'
+  ,  96 : 'num_0'
+  ,  97 : 'num_1'
+  ,  98 : 'num_2'
+  ,  99 : 'num_3'
+  , 100 : 'num_4'
+  , 101 : 'num_5'
+  , 102 : 'num_6'
+  , 103 : 'num_7'
+  , 104 : 'num_8'
+  , 105 : 'num_9'
+  , 106 : 'multiply'
+  , 107 : 'add'
+  , 109 : 'subtract'
+  , 110 : 'decimalpoint'
+  , 111 : 'divide'
+  , 112 : 'f1'
+  , 113 : 'f2'
+  , 114 : 'f3'
+  , 115 : 'f4'
+  , 116 : 'f5'
+  , 117 : 'f6'
+  , 118 : 'f7'
+  , 119 : 'f8'
+  , 120 : 'f9'
+  , 121 : 'f10'
+  , 122 : 'f11'
+  , 123 : 'f12'
+  , 144 : 'numlock'
+  , 145 : 'scrolllock'
+  , 186 : 'semicolon'
+  , 187 : 'equalsign'
+  , 188 : 'comma'
+  , 189 : 'dash'
+  , 190 : 'period'
+  , 191 : 'forwardslash'
+  , 192 : 'graveaccent'
+  , 219 : 'openbracket'
+  , 220 : 'backslash'
+  , 221 : 'closebraket'
+  , 222 : 'singlequote'
 }
 
-module.exports.PlayerPhysics = PlayerPhysics
+module.exports = function(opts) {
+  return new HUD(opts)
+}
 
-function PlayerPhysics(camera, opts) {
-  if (!(this instanceof PlayerPhysics)) return new PlayerPhysics(camera, opts)
+function HUD(opts) {
+  if (!(this instanceof HUD)) return new HUD(opts)
   var self = this
   if (!opts) opts = {}
-  
-  
-  this.readable = true
-  this.writable = true
-  this.enabled = false
-  
-  this.speed = {
-    jump: (opts.jump || 3.25),
-    move: (opts.move || 0.2),
-    fall: (opts.fall || 0.3),
-  }
-  
-  this.jumpTime = 250
-  this.jumpRemaining = 0
-
-  this.pitchObject = opts.pitchObject || new THREE.Object3D()
-  if (camera) this.pitchObject.add( camera )
-
-  this.yawObject = opts.yawObject || new THREE.Object3D()
-  this.yawObject.position.y = 10
-  this.yawObject.add( this.pitchObject )
-
-  this.moveForward = false
-  this.moveBackward = false
-  this.moveLeft = false
-  this.moveRight = false
-
-  this.freedom = {
-    'x+': true,
-    'x-': true,
-    'y+': true,
-    'y-': true,
-    'z+': true,
-    'z-': true
-  }
-  
-  this.wantsJump = false
-  this.gravityEnabled = true
-  
-  this.velocity = opts.velocityObject || new THREE.Vector3()
-
-  this.on('command', function(command, setting) {
-    self[command] = setting
-  })  
+  this.el = opts.el || 'nav'
+  if (typeof this.el !== 'object') this.el = document.querySelector(this.el)
+  this.toolbarKeys = opts.toolbarKeys || ['1','2','3','4','5','6','7','8','9','0']
+  this.bindEvents()
 }
 
-inherits(PlayerPhysics, stream.Stream)
+inherits(HUD, events.EventEmitter)
 
-PlayerPhysics.prototype.playerIsMoving = function() { 
-  var v = this.velocity
-  if (Math.abs(v.x) > 0.1 || Math.abs(v.y) > 0.1 || Math.abs(v.z) > 0.1) return true
-  return false
+HUD.prototype.onKeyDown = function() {
+  var self = this
+  keymaster.getPressedKeyCodes().map(function(keyCode) {
+    var pressed = keyTable[keyCode]
+    if (self.toolbarKeys.indexOf(pressed) > -1) return self.switchToolbar(pressed)
+  })
 }
 
-PlayerPhysics.prototype.write = function(data) {
-  if (this.enabled === false) return
-  this.applyRotationDeltas(data)
+HUD.prototype.bindEvents = function() {
+  var self = this
+  window.addEventListener('keydown', this.onKeyDown.bind(this))
+  var list = this.el.querySelectorAll('li')
+  list = Array.prototype.slice.call(list);
+  list.map(function(li) { 
+    li.addEventListener('click', self.onItemClick.bind(self))
+  })
 }
 
-PlayerPhysics.prototype.end = function() {
-  this.emit('end')
+HUD.prototype.onItemClick = function(ev) {
+  var idx = this.toolbarIndexOf(ev.currentTarget)
+  if (idx > -1) this.switchToolbar(idx)
 }
 
-PlayerPhysics.prototype.applyRotationDeltas = function(deltas) {
-  this.yawObject.rotation.y -= deltas.dx * 0.002
-  this.pitchObject.rotation.x -= deltas.dy * 0.002
-  this.pitchObject.rotation.x = Math.max(-PI_2, Math.min(PI_2, this.pitchObject.rotation.x))
+HUD.prototype.addClass = function(el, className) {
+  if (!el) return
+  if (el.className === "") return el.className = className
+  var classes = el.className.split(' ')
+  classes.push(className)
+  el.className = classes.join(' ')
+  return classes
 }
 
-PlayerPhysics.prototype.tick = function (delta, cb) {
-  if (this.enabled === false) return
-
-  delta *= 0.1
-
-  this.velocity.x += (-this.velocity.x) * 0.08 * delta
-  this.velocity.z += (-this.velocity.z) * 0.08 * delta
-
-  if (this.freedom['y-']) this.wantsJump = false
-  if (this.wantsJump && this.jumpRemaining <= 0) this.jumpRemaining = this.jumpTime
-  if (this.jumpRemaining > 0) this.jumpRemaining -= delta * 100
-  if (this.jumpRemaining > 0) {
-    this.velocity.y += this.speed.jump * delta
-  } else {
-    this.jumpRemaining = 0
-    if (this.gravityEnabled) this.velocity.y -= this.speed.fall * delta
-  }
-
-  if (this.moveForward) this.velocity.z -= this.speed.move * delta
-  if (this.moveBackward) this.velocity.z += this.speed.move * delta
-
-  if (this.moveLeft) this.velocity.x -= this.speed.move * delta
-  if (this.moveRight) this.velocity.x += this.speed.move * delta
-  
-  if (!this.freedom['x-']) this.velocity.x = Math.max(0, this.velocity.x)
-  if (!this.freedom['x+']) this.velocity.x = Math.min(0, this.velocity.x)
-  if (!this.freedom['y-']) this.velocity.y = Math.max(-0.0001, this.velocity.y)
-  if (!this.freedom['y+']) this.velocity.y = Math.min(0, this.velocity.y)
-  if (!this.freedom['z-']) this.velocity.z = Math.max(0, this.velocity.z)
-  if (!this.freedom['z+']) this.velocity.z = Math.min(0, this.velocity.z)
-  
-  if (cb) cb(this)
+HUD.prototype.removeClass = function(el, className) {
+  if (!el) return
+  if (el.className === "") return
+  var classes = el.className.split(' ')
+  var idx = classes.indexOf(className)
+  if (idx > -1) classes.splice(idx, 1)
+  el.className = classes.join(' ')
+  return classes
 }
 
+HUD.prototype.toolbarIndexOf = function(li) {
+  var list = this.el.querySelectorAll('.tab-item') 
+  list = Array.prototype.slice.call(list)
+  var idx = list.indexOf(li)
+  if (idx > -1) ++idx
+  return idx
+}
+
+HUD.prototype.switchToolbar = function(num) {
+  this.removeClass(this.el.querySelector('.active'), 'active')
+  var selected = this.el.querySelectorAll('.tab-item')[+num-1]
+  this.addClass(selected, 'active')
+  var active = this.el.querySelector('.active .tab-label')
+  if (!active) return
+  this.emit('select', active.innerText)
+}
 });
 
-require.define("/node_modules/player-physics/node_modules/inherits/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./inherits.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/toolbar/lib/keymaster.js",function(require,module,exports,__dirname,__filename,process,global){//     keymaster.js
+//     (c) 2011-2012 Thomas Fuchs
+//     keymaster.js may be freely distributed under the MIT license.
+
+;(function(global){
+  var k,
+    _handlers = {},
+    _mods = { 16: false, 18: false, 17: false, 91: false },
+    _scope = 'all',
+    // modifier keys
+    _MODIFIERS = {
+      '⇧': 16, shift: 16,
+      '⌥': 18, alt: 18, option: 18,
+      '⌃': 17, ctrl: 17, control: 17,
+      '⌘': 91, command: 91
+    },
+    // special keys
+    _MAP = {
+      backspace: 8, tab: 9, clear: 12,
+      enter: 13, 'return': 13,
+      esc: 27, escape: 27, space: 32,
+      left: 37, up: 38,
+      right: 39, down: 40,
+      del: 46, 'delete': 46,
+      home: 36, end: 35,
+      pageup: 33, pagedown: 34,
+      ',': 188, '.': 190, '/': 191,
+      '`': 192, '-': 189, '=': 187,
+      ';': 186, '\'': 222,
+      '[': 219, ']': 221, '\\': 220
+    },
+    _downKeys = [];
+
+  for(k=1;k<20;k++) _MODIFIERS['f'+k] = 111+k;
+
+  // IE doesn't support Array#indexOf, so have a simple replacement
+  function index(array, item){
+    var i = array.length;
+    while(i--) if(array[i]===item) return i;
+    return -1;
+  }
+
+  // handle keydown event
+  function dispatch(event, scope){
+    var key, handler, k, i, modifiersMatch;
+    key = event.keyCode;
+
+    if (index(_downKeys, key) == -1) {
+        _downKeys.push(key);
+    }
+
+    // if a modifier key, set the key.<modifierkeyname> property to true and return
+    if(key == 93 || key == 224) key = 91; // right command on webkit, command on Gecko
+    if(key in _mods) {
+      _mods[key] = true;
+      // 'assignKey' from inside this closure is exported to window.key
+      for(k in _MODIFIERS) if(_MODIFIERS[k] == key) assignKey[k] = true;
+      return;
+    }
+
+    // see if we need to ignore the keypress (filter() can can be overridden)
+    // by default ignore key presses if a select, textarea, or input is focused
+    if(!assignKey.filter.call(this, event)) return;
+
+    // abort if no potentially matching shortcuts found
+    if (!(key in _handlers)) return;
+
+    // for each potential shortcut
+    for (i = 0; i < _handlers[key].length; i++) {
+      handler = _handlers[key][i];
+
+      // see if it's in the current scope
+      if(handler.scope == scope || handler.scope == 'all'){
+        // check if modifiers match if any
+        modifiersMatch = handler.mods.length > 0;
+        for(k in _mods)
+          if((!_mods[k] && index(handler.mods, +k) > -1) ||
+            (_mods[k] && index(handler.mods, +k) == -1)) modifiersMatch = false;
+        // call the handler and stop the event if neccessary
+        if((handler.mods.length == 0 && !_mods[16] && !_mods[18] && !_mods[17] && !_mods[91]) || modifiersMatch){
+          if(handler.method(event, handler)===false){
+            if(event.preventDefault) event.preventDefault();
+              else event.returnValue = false;
+            if(event.stopPropagation) event.stopPropagation();
+            if(event.cancelBubble) event.cancelBubble = true;
+          }
+        }
+      }
+    }
+  };
+
+  // unset modifier keys on keyup
+  function clearModifier(event){
+    var key = event.keyCode, k,
+        i = index(_downKeys, key);
+
+    // remove key from _downKeys
+    if (i >= 0) {
+        _downKeys.splice(i, 1);
+    }
+
+    if(key == 93 || key == 224) key = 91;
+    if(key in _mods) {
+      _mods[key] = false;
+      for(k in _MODIFIERS) if(_MODIFIERS[k] == key) assignKey[k] = false;
+    }
+  };
+
+  function resetModifiers() {
+    for(k in _mods) _mods[k] = false;
+    for(k in _MODIFIERS) assignKey[k] = false;
+  }
+
+  // parse and assign shortcut
+  function assignKey(key, scope, method){
+    var keys, mods, i, mi;
+    if (method === undefined) {
+      method = scope;
+      scope = 'all';
+    }
+    key = key.replace(/\s/g,'');
+    keys = key.split(',');
+
+    if((keys[keys.length-1])=='')
+      keys[keys.length-2] += ',';
+    // for each shortcut
+    for (i = 0; i < keys.length; i++) {
+      // set modifier keys if any
+      mods = [];
+      key = keys[i].split('+');
+      if(key.length > 1){
+        mods = key.slice(0,key.length-1);
+        for (mi = 0; mi < mods.length; mi++)
+          mods[mi] = _MODIFIERS[mods[mi]];
+        key = [key[key.length-1]];
+      }
+      // convert to keycode and...
+      key = key[0]
+      key = _MAP[key] || key.toUpperCase().charCodeAt(0);
+      // ...store handler
+      if (!(key in _handlers)) _handlers[key] = [];
+      _handlers[key].push({ shortcut: keys[i], scope: scope, method: method, key: keys[i], mods: mods });
+    }
+  };
+
+  // Returns true if the key with code 'keyCode' is currently down
+  // Converts strings into key codes.
+  function isPressed(keyCode) {
+      if (typeof(keyCode)=='string') {
+          if (keyCode.length == 1) {
+              keyCode = (keyCode.toUpperCase()).charCodeAt(0);
+          } else {
+              return false;
+          }
+      }
+      return index(_downKeys, keyCode) != -1;
+  }
+
+  function getPressedKeyCodes() {
+      return _downKeys.slice(0);
+  }
+
+  function filter(event){
+    var tagName = (event.target || event.srcElement).tagName;
+    // ignore keypressed in any elements that support keyboard data input
+    return !(tagName == 'INPUT' || tagName == 'SELECT' || tagName == 'TEXTAREA');
+  }
+
+  // initialize key.<modifier> to false
+  for(k in _MODIFIERS) assignKey[k] = false;
+
+  // set current scope (default 'all')
+  function setScope(scope){ _scope = scope || 'all' };
+  function getScope(){ return _scope || 'all' };
+
+  // delete all handlers for a given scope
+  function deleteScope(scope){
+    var key, handlers, i;
+
+    for (key in _handlers) {
+      handlers = _handlers[key];
+      for (i = 0; i < handlers.length; ) {
+        if (handlers[i].scope === scope) handlers.splice(i, 1);
+        else i++;
+      }
+    }
+  };
+
+  // cross-browser events
+  function addEvent(object, event, method) {
+    if (object.addEventListener)
+      object.addEventListener(event, method, false);
+    else if(object.attachEvent)
+      object.attachEvent('on'+event, function(){ method(window.event) });
+  };
+
+  // set the handlers globally on document
+  addEvent(document, 'keydown', function(event) { dispatch(event, _scope) }); // Passing _scope to a callback to ensure it remains the same by execution. Fixes #48
+  addEvent(document, 'keyup', clearModifier);
+
+  // reset modifiers to false whenever the window is (re)focused.
+  addEvent(window, 'focus', resetModifiers);
+
+  // store previously defined key
+  var previousKey = global.key;
+
+  // restore previously defined key and return reference to our key object
+  function noConflict() {
+    var k = global.key;
+    global.key = previousKey;
+    return k;
+  }
+
+  // set window.key and window.key.set/get/deleteScope, and the default filter
+  global.key = assignKey;
+  global.key.setScope = setScope;
+  global.key.getScope = getScope;
+  global.key.deleteScope = deleteScope;
+  global.key.filter = filter;
+  global.key.isPressed = isPressed;
+  global.key.getPressedKeyCodes = getPressedKeyCodes;
+  global.key.noConflict = noConflict;
+
+  if(typeof module !== 'undefined') module.exports = global.key;
+
+})(this);
 });
 
-require.define("/node_modules/player-physics/node_modules/inherits/inherits.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = inherits
+require.define("/node_modules/voxel-hello-world/node_modules/toolbar/node_modules/inherits/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./inherits.js"}
+});
+
+require.define("/node_modules/voxel-hello-world/node_modules/toolbar/node_modules/inherits/inherits.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = inherits
 
 function inherits (c, p, proto) {
   proto = proto || {}
@@ -81227,3410 +80663,10 @@ function inherits (c, p, proto) {
 
 });
 
-require.define("/node_modules/mux-demux/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+require.define("/node_modules/voxel-hello-world/node_modules/minecraft-skin/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
 });
 
-require.define("/node_modules/mux-demux/index.js",function(require,module,exports,__dirname,__filename,process,global){'use strict';
-
-var through = require('through')
-  , extend = require('xtend')
-  , duplex = require('duplex')
-  , serializer = require('stream-serializer')
-
-function MuxDemux (opts, onConnection) {
-  if('function' === typeof opts)
-    onConnection = opts, opts = null
-  opts = opts || {}
-
-  function createID() {
-    return (
-      Math.random().toString(16).slice(2) +
-      Math.random().toString(16).slice(2)
-    )
-  }
-
-  var streams = {}, streamCount = 0
-  var md = duplex().resume()
-
-  md.on('_data', function (data) {
-    var id = data.shift()
-    var event = data[0]
-    var s = streams[id]
-    if(!s) {
-      if(event == 'close')
-        return
-      if(event != 'new')
-        return outer.emit('unknown', id)
-      md.emit('connection', createStream(id, data[1].meta, data[1].opts))
-    }
-    else if (event === 'pause')
-      s.paused = true
-    else if (event === 'resume') {
-      var p = s.paused
-      s.paused = false
-      if(p) s.emit('drain')
-    }
-    else if (event === 'error') {
-      var error = data[1]
-      if (typeof error === 'string') {
-        s.emit('error', new Error(error))
-      } else if (typeof error.message === 'string') {
-        var e = new Error(error.message)
-        extend(e, error)
-        s.emit('error', e)
-      } else {
-        s.emit('error', error)
-      }
-    }
-    else {
-      s.emit.apply(s, data)
-    }
-  })
-
-  function destroyAll (_err) {
-    md.removeListener('end', destroyAll)
-    md.removeListener('error', destroyAll)
-    md.removeListener('close', destroyAll)
-    var err = _err || new Error ('unexpected disconnection')
-    for (var i in streams) {
-      var s = streams[i]
-      s.destroyed = true
-      if (opts.error !== true) {
-        s.end()
-      } else {
-        s.emit('error', err)
-        s.destroy()
-      }
-    }
-  }
-
-  //end the stream once sub-streams have ended.
-  //(waits for them to close, like on a tcp server)
-
-  function createStream(id, meta, opts) {
-    streamCount ++
-    var s = through(function (data) {
-      if(!this.writable) {
-        var err = Error('stream is not writable: ' + id)
-        err.stream = this
-        return outer.emit("error", err)
-      }
-
-      md._data([s.id, 'data', data])
-    }, function () {
-      md._data([s.id, 'end'])
-      if (this.readable && !opts.allowHalfOpen && !this.ended) {
-        this.emit("end")
-      }
-    })
-    s.pause = function () {
-      md._data([s.id, 'pause'])
-    }
-    s.resume = function () {
-      md._data([s.id, 'resume'])
-    }
-    s.error = function (message) {
-      md._data([s.id, 'error', message])
-    }
-    s.once('close', function () {
-      delete streams[id]
-      streamCount --
-      md._data([s.id, 'close'])
-      if(streamCount === 0)
-        md.emit('zero')
-    })
-    s.writable = opts.writable
-    s.readable = opts.readable
-    streams[s.id = id] = s
-    s.meta = meta
-    return s
-  }
-
-  var outer = serializer(opts.wrapper)(md)
-
-  if(md !== outer)
-    md.on('connection', function (stream) {
-      outer.emit('connection', stream)
-    })
-
-  outer.close = function (cb) {
-    md.once('zero', function () {
-      md._end()
-      if(cb) cb()
-    })
-    return this
-  }
-
-  if(onConnection)
-    outer.on('connection', onConnection)
-
-  outer.on('connection', function (stream) {
-    //if mux-demux recieves a stream but there is nothing to handle it,
-    //then return an error to the other side.
-    //still trying to think of the best error message.
-    if(outer.listeners('connection').length === 1)
-      stream.error('remote end lacks connection listener')
-  })
-
-  var pipe = outer.pipe
-  outer.pipe = function (dest, opts) {
-    pipe.call(outer, dest, opts)
-    md.on('end', destroyAll)
-    md.on('close', destroyAll)
-    md.on('error', destroyAll)
-    return dest
-  }
-
-  outer.createStream = function (meta, opts) {
-    opts = opts || {}
-    if (!opts.writable && !opts.readable)
-      opts.readable = opts.writable = true
-    var s = createStream(createID(), meta, opts)
-    var _opts = {writable: opts.readable, readable: opts.writable}
-    md._data([s.id, 'new', {meta: meta, opts: _opts}])
-    return s
-  }
-  outer.createWriteStream = function (meta) {
-    return outer.createStream(meta, {writable: true, readable: false})
-  }
-  outer.createReadStream = function (meta) {
-    return outer.createStream(meta, {writable: false, readable: true})
-  }
-
-  return outer
-}
-
-module.exports = MuxDemux
-
-
-});
-
-require.define("/node_modules/mux-demux/node_modules/through/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
-});
-
-require.define("/node_modules/mux-demux/node_modules/through/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
-
-// through
-//
-// a stream that does nothing but re-emit the input.
-// useful for aggregating a series of changing but not ending streams into one stream)
-
-
-
-exports = module.exports = through
-through.through = through
-
-//create a readable writable stream.
-
-function through (write, end) {
-  write = write || function (data) { this.emit('data', data) }
-  end = end || function () { this.emit('end') }
-
-  var ended = false, destroyed = false
-  var stream = new Stream(), buffer = []
-  stream.buffer = buffer
-  stream.readable = stream.writable = true
-  stream.paused = false
-  stream.write = function (data) {
-    write.call(this, data)
-    return !stream.paused
-  }
-
-  function drain() {
-    while(buffer.length && !stream.paused) {
-      var data = buffer.shift()
-      if(null === data)
-        return stream.emit('end')
-      else
-        stream.emit('data', data)
-    }
-  }
-
-  stream.queue = function (data) {
-    buffer.push(data)
-    drain()
-  }
-
-  //this will be registered as the first 'end' listener
-  //must call destroy next tick, to make sure we're after any
-  //stream piped from here.
-  //this is only a problem if end is not emitted synchronously.
-  //a nicer way to do this is to make sure this is the last listener for 'end'
-
-  stream.on('end', function () {
-    stream.readable = false
-    if(!stream.writable)
-      process.nextTick(function () {
-        stream.destroy()
-      })
-  })
-
-  function _end () {
-    stream.writable = false
-    end.call(stream)
-    if(!stream.readable)
-      stream.destroy()
-  }
-
-  stream.end = function (data) {
-    if(ended) return
-    ended = true
-    if(arguments.length) stream.write(data)
-    _end() // will emit or queue
-  }
-
-  stream.destroy = function () {
-    if(destroyed) return
-    destroyed = true
-    ended = true
-    buffer.length = 0
-    stream.writable = stream.readable = false
-    stream.emit('close')
-  }
-
-  stream.pause = function () {
-    if(stream.paused) return
-    stream.paused = true
-    stream.emit('pause')
-  }
-  stream.resume = function () {
-    if(stream.paused) {
-      stream.paused = false
-    }
-    drain()
-    //may have become paused again,
-    //as drain emits 'data'.
-    if(!stream.paused)
-      stream.emit('drain')
-  }
-  return stream
-}
-
-
-});
-
-require.define("/node_modules/mux-demux/node_modules/xtend/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index"}
-});
-
-require.define("/node_modules/mux-demux/node_modules/xtend/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = extend
-
-function extend(target) {
-    for (var i = 1; i < arguments.length; i++) {
-        var source = arguments[i],
-            keys = Object.keys(source)
-
-        for (var j = 0; j < keys.length; j++) {
-            var name = keys[j]
-            target[name] = source[name]
-        }
-    }
-
-    return target
-}
-});
-
-require.define("/node_modules/mux-demux/node_modules/duplex/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/mux-demux/node_modules/duplex/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
-
-module.exports = function (write, end) {
-  var stream = new Stream() 
-  var buffer = [], ended = false, destroyed = false, emitEnd
-  stream.writable = stream.readable = true
-  stream.paused = false
-  stream._paused = false
-  stream.buffer = buffer
-  
-  stream
-    .on('pause', function () {
-      stream._paused = true
-    })
-    .on('drain', function () {
-      stream._paused = false
-    })
-   
-  function destroySoon () {
-    process.nextTick(stream.destroy.bind(stream))
-  }
-
-  if(write)
-    stream.on('_data', write)
-  if(end)
-    stream.on('_end', end)
-
-  //destroy the stream once both ends are over
-  //but do it in nextTick, so that other listeners
-  //on end have time to respond
-  stream.once('end', function () { 
-    stream.readable = false
-    if(!stream.writable) {
-      process.nextTick(function () {
-        stream.destroy()
-      })
-    }
-  })
-
-  stream.once('_end', function () { 
-    stream.writable = false
-    if(!stream.readable)
-      stream.destroy()
-  })
-
-  // this is the default write method,
-  // if you overide it, you are resposible
-  // for pause state.
-
-  
-  stream._data = function (data) {
-    if(!stream.paused && !buffer.length)
-      stream.emit('data', data)
-    else 
-      buffer.push(data)
-    return !(stream.paused || buffer.length)
-  }
-
-  stream._end = function (data) { 
-    if(data) stream._data(data)
-    if(emitEnd) return
-    emitEnd = true
-    //destroy is handled above.
-    stream.drain()
-  }
-
-  stream.write = function (data) {
-    stream.emit('_data', data)
-    return !stream._paused
-  }
-
-  stream.end = function () {
-    stream.writable = false
-    if(stream.ended) return
-    stream.ended = true
-    stream.emit('_end')
-  }
-
-  stream.drain = function () {
-    if(!buffer.length && !emitEnd) return
-    //if the stream is paused after just before emitEnd()
-    //end should be buffered.
-    while(!stream.paused) {
-      if(buffer.length) {
-        stream.emit('data', buffer.shift())
-        if(buffer.length == 0) {
-          stream.emit('_drain')
-        }
-      }
-      else if(emitEnd && stream.readable) {
-        stream.readable = false
-        stream.emit('end')
-        return
-      } else {
-        //if the buffer has emptied. emit drain.
-        return true
-      }
-    }
-  }
-  var started = false
-  stream.resume = function () {
-    //this is where I need pauseRead, and pauseWrite.
-    //here the reading side is unpaused,
-    //but the writing side may still be paused.
-    //the whole buffer might not empity at once.
-    //it might pause again.
-    //the stream should never emit data inbetween pause()...resume()
-    //and write should return !buffer.length
-    started = true
-    stream.paused = false
-    stream.drain() //will emit drain if buffer empties.
-    return stream
-  }
-
-  stream.destroy = function () {
-    if(destroyed) return
-    destroyed = ended = true     
-    buffer.length = 0
-    stream.emit('close')
-  }
-  var pauseCalled = false
-  stream.pause = function () {
-    started = true
-    stream.paused = true
-    stream.emit('_pause')
-    return stream
-  }
-  stream._pause = function () {
-    if(!stream._paused) {
-      stream._paused = true
-      stream.emit('pause')
-    }
-    return this
-  }
-  stream.paused = true
-  process.nextTick(function () {
-    //unless the user manually paused
-    if(started) return
-    stream.resume()
-  })
- 
-  return stream
-}
-
-
-});
-
-require.define("/node_modules/mux-demux/node_modules/stream-serializer/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/mux-demux/node_modules/stream-serializer/index.js",function(require,module,exports,__dirname,__filename,process,global){
-var EventEmitter = require('events').EventEmitter
-
-exports = module.exports = function (wrapper) {
-
-  if('function' == typeof wrapper)
-    return wrapper
-  
-  return exports[wrapper] || exports.json
-}
-
-exports.json = function (stream) {
-
-  var write = stream.write
-  var soFar = ''
-
-  function parse (line) {
-    var js
-    try {
-      js = JSON.parse(line)
-      //ignore lines of whitespace...
-    } catch (err) { 
-      return console.error('invalid JSON', line)
-    }
-    if(js !== undefined)
-      write.call(stream, js)
-  }
-
-  function onData (data) {
-    var lines = (soFar + data).split('\n')
-    soFar = lines.pop()
-    while(lines.length) {
-      parse(lines.shift())
-    }
-  }
-
-  stream.write = onData
-  
-  var end = stream.end
-
-  stream.end = function (data) {
-    if(data)
-      stream.write(data)
-    //if there is any left over...
-    if(soFar) {
-      parse(soFar)
-    }
-    return end.call(stream)
-  }
-
-  stream.emit = function (event, data) {
-
-    if(event == 'data') {
-      data = JSON.stringify(data) + '\n'
-    }
-    //since all stream events only use one argument, this is okay...
-    EventEmitter.prototype.emit.call(stream, event, data)
-  }
-
-  return stream
-//  return es.pipeline(es.split(), es.parse(), stream, es.stringify())
-}
-
-exports.raw = function (stream) {
-  return stream
-}
-
-
-});
-
-require.define("/node_modules/scuttlebutt/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/scuttlebutt/model.js",function(require,module,exports,__dirname,__filename,process,global){var Scuttlebutt = require('./index')
-var inherits = require('util').inherits
-var each = require('iterate').each
-var u = require('./util')
-
-module.exports = Model
-
-inherits(Model, Scuttlebutt)
-
-function Model (opts) {
-  if(!(this instanceof Model)) return new Model(opts)
-  Scuttlebutt.call(this, opts)
-  this.store = {}
-}
-
-var m = Model.prototype
-
-m.set = function (k, v) {
-  this.localUpdate([k, v])
-  return this
-}
-
-m.get = function (k) {
-  if(this.store[k])
-    return this.store[k][0][1]
-}
-
-//return this history since sources.
-//sources is a hash of { ID: TIMESTAMP }
-
-m.applyUpdate = function (update) {
-  var key = update[0][0]
-  //ignore if we already have a more recent value
-  if('undefined' !== typeof this.store[key]
-    && this.store[key][1] > update[1])
-    return this.emit('_remove', update)
-
-  if(this.store[key]) this.emit('_remove', this.store[key])
-
-  this.store[key] = update
-  this.emit.apply(this, ['update'].concat(update))
-  this.emit('change', key, update[0][1])
-  this.emit('change:'+key, update[0][1])
-
-  return true
-}
-
-m.history = function (sources) {
-  var self = this
-  var h = []
-  each(this.store, function (e) {
-    if(u.filter(e, sources))
-      h.push(e)
-  })
-  return h
-}
-
-m.toJSON = function () {
-  var o = {}
-  for (var k in this.store)
-    o[k] = this.get(k)
-  return o
-}
-
-});
-
-require.define("/node_modules/scuttlebutt/index.js",function(require,module,exports,__dirname,__filename,process,global){var EventEmitter = require('events').EventEmitter
-var i = require('iterate')
-var duplex = require('duplex')
-var inherits = require('util').inherits
-var serializer = require('stream-serializer')
-var u = require('./util')
-var timestamp = require('monotonic-timestamp')
-
-exports = 
-module.exports = Scuttlebutt
-
-exports.createID = u.createID
-exports.updateIsRecent = u.filter
-exports.filter = u.filter
-exports.timestamp = timestamp
-
-function dutyOfSubclass() {
-  throw new Error('method must be implemented by subclass')
-}
-
-function validate (data) {
-  var ts = data[1], source = data[2]
-
-  if(  !Array.isArray(data) 
-    || 'string'    !== typeof source
-    || 'number'    !== typeof ts
-  ) return false
-
-  return true
-}
-
-var emit = EventEmitter.prototype.emit
-
-inherits (Scuttlebutt, EventEmitter)
-
-function Scuttlebutt (opts) {
-
-  if(!(this instanceof Scuttlebutt)) return new Scuttlebutt(opts)
-  var id = 'string' === typeof opts ? opts : opts && opts.id
-  this.sources = {}
-  this.setMaxListeners(Number.MAX_VALUE)
-  //count how many other instances we are replicating to.
-  this._streams = 0
-  if(opts && opts.sign && opts.verify) {
-    this.id      = opts.id || opts.createId()
-    this._sign   = opts.sign
-    this._verify = opts.verify
-  } else {
-    this.id = id || u.createId()
-  }
-}
-
-var sb = Scuttlebutt.prototype
-
-var emit = EventEmitter.prototype.emit
-
-sb.applyUpdate = dutyOfSubclass
-sb.history      = dutyOfSubclass
-
-sb.localUpdate = function (trx) {
-  this._update([trx, timestamp(), this.id])
-  return this
-}
-
-sb._update = function (update) {
-  var ts = update[1]
-  var source = update[2]
-  //if this message is old for it's source,
-  //ignore it. it's out of order.
-  //each node must emit it's changes in order!
-  
-  var latest = this.sources[source]
-  if(latest && latest >= ts)
-    return emit.call(this, 'old_data', update), false
-
-  this.sources[source] = ts
-
-  var self = this
-  function didVerification (err, verified) {
-
-    // I'm not sure how what should happen if a async verification
-    // errors. if it's an key not found - that is a verification fail,
-    // not a error. if it's genunie error, really you should queue and 
-    // try again? or replay the message later
-    // -- this should be done my the security plugin though, not scuttlebutt.
-
-    if(err)
-      return emit.call(self, 'error', err)
-
-    if(!verified)
-      return emit.call(self, 'unverified_data', update)
-
-    // check if this message is older than
-    // the value we already have.
-    // do nothing if so
-    // emit an 'old_data' event because i'll want to track how many
-    // unnecessary messages are sent.
-
-    if(self.applyUpdate(update))
-      emit.call(self, '_update', update) //write to stream.
-
-  }
-
-  if(source !== this.id) {
-    if(this._verify)
-      this._verify(update, didVerification)
-    else
-      didVerification(null, true)
-  } else {
-    if(this._sign) {
-      //could make this async easily enough.
-      update[3] = this._sign(update)
-    }
-    didVerification(null, true)
-  }
-
-  return true
-}
-
-sb.createStream = function (opts) {
-  var self = this
-  //the sources for the remote end.
-  var sources = {}, other
-  var syncSent = false, syncRecv = false
-
-  this._streams ++
-
-  opts = opts || {}
-  var d = duplex()
-  d.name = opts.name
-  var outer = serializer(opts && opts.wrapper)(d)
-  outer.inner = d
-
-  d.writable = opts.writable !== false
-  d.readable = opts.readable !== false
-
-  syncRecv   = !d.writable
-  syncSent   = !d.readable
-
-  var tail = opts.tail !== false //default to tail=true
-
-  function start (data) {
-    //when the digest is recieved from the other end,
-    //send the history.
-    //merge with the current list of sources.
-    sources = data.clock
-    i.each(self.history(sources), function (data) {d._data(data)})
-    
-    outer.emit('header', data)
-    d._data('SYNC')
-    //when we have sent all history
-    outer.emit('syncSent')
-    syncSent = true
-    //when we have recieved all histoyr
-    //emit 'synced' when this stream has synced.
-    if(syncRecv) outer.emit('sync'), outer.emit('synced')
-    if(!tail) d._end()
-  }
-
-  d
-    .on('_data', function (data) {
-      //if it's an array, it's an update.
-      if(Array.isArray(data)) {
-        if(validate(data))
-          return self._update(data)
-      }
-      //if it's an object, it's a scuttlebut digest.
-      else if('object' === typeof data && data)
-        start(data)
-      else if('string' === typeof data && data == 'SYNC') {
-        syncRecv = true
-        outer.emit('syncRecieved')
-        if(syncSent) outer.emit('sync'), outer.emit('synced')
-      }
-    }).on('_end', function () {
-      d._end()
-    })
-    .on('close', function () {
-      self.removeListener('_update', onUpdate)
-      //emit the number of streams that are remaining...
-      //this will be used for memory management...
-      self._streams --
-      emit.call(self, 'unstream', self._streams)
-    })
-
-  if(opts && opts.tail === false) {
-    outer.on('sync', function () {
-      process.nextTick(function () {
-        d._end()
-      })
-    })
-  }
-  function onUpdate (update) { //key, value, source, ts
-    if(!u.filter(update, sources))
-      return
-
-    d._data(update)
-
-    //really, this should happen before emitting.
-    var ts = update[1]
-    var source = update[2]
-    sources[source] = ts
-  }
-
-  var outgoing = { id : self.id, clock : self.sources }
-
-  if (opts && opts.meta) outgoing.meta = opts.meta
-
-  if(d.readable) {
-    d._data(outgoing)
-    if(!d.writable)
-      start({clock:{}})
-    if(tail)
-      self.on('_update', onUpdate)
-  }
-
-  self.once('dispose', function () {
-    d.end()
-  })
-
-  return outer
-}
-
-sb.createWriteStream = function (opts) {
-  opts = opts || {}
-  opts.writable = true; opts.readable = false
-  return this.createStream(opts)
-}
-
-sb.createReadStream = function (opts) {
-  opts = opts || {}
-  opts.writable = false; opts.readable = true
-  return this.createStream(opts)
-}
-
-sb.dispose = function () {
-  emit.call(this, 'dispose')
-}
-
-sb.setId = function (id) {
-  this.id = id
-  return this
-}
-
-//create another instance of this scuttlebutt,
-//that is in sync and attached to this instance.
-sb.clone = function () {
-  var A = this
-  var B = new (A.constructor)
-  B.setId(A.id) //same id. think this will work...
-
-  var a = A.createStream({wrapper: 'raw'})
-  var b = B.createStream({wrapper: 'raw'})
-
-  //all updates must be sync, so make sure pause never happens.
-  a.pause = b.pause = function noop(){}
-
-  a.pipe(b).pipe(a)
-  //resume both streams, so that the new instance is brought up to date immediately.
-  a.resume()
-  b.resume()
-
-  return B
-}
-
-});
-
-require.define("/node_modules/scuttlebutt/node_modules/iterate/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
-});
-
-require.define("/node_modules/scuttlebutt/node_modules/iterate/index.js",function(require,module,exports,__dirname,__filename,process,global){
-//
-// adds all the fields from obj2 onto obj1
-//
-
-var each = exports.each = function (obj,iterator){
- var keys = Object.keys(obj)
- keys.forEach(function (key){
-  iterator(obj[key],key,obj) 
- })
-}
-
-var RX = /sadf/.constructor
-function rx (iterator ){
-  return iterator instanceof RX ? function (str) { 
-      var m = iterator.exec(str)
-      return m && (m[1] ? m[1] : m[0]) 
-    } : iterator
-}
-
-var times = exports.times = function () {
-  var args = [].slice.call(arguments)
-    , iterator = rx(args.pop())
-    , m = args.pop()
-    , i = args.shift()
-    , j = args.shift()
-    , diff, dir
-    , a = []
-    
-    i = 'number' === typeof i ? i : 1
-    diff = j ? j - i : 1
-    dir = i < m
-    if(m == i)
-      throw new Error('steps cannot be the same: '+m+', '+i)
-  for (; dir ? i <= m : m <= i; i += diff)
-    a.push(iterator(i))
-  return a
-}
-
-var map = exports.map = function (obj, iterator){
-  iterator = rx(iterator)
-  if(Array.isArray(obj))
-    return obj.map(iterator)
-  if('number' === typeof obj)
-    return times.apply(null, [].slice.call(arguments))  
-  //return if null ?  
-  var keys = Object.keys(obj)
-    , r = {}
-  keys.forEach(function (key){
-    r[key] = iterator(obj[key],key,obj) 
-  })
-  return r
-}
-
-var findReturn = exports.findReturn = function (obj, iterator) {
-  iterator = rx(iterator)
-  if(obj == null)
-    return
-  var keys = Object.keys(obj)
-    , l = keys.length
-  for (var i = 0; i < l; i ++) {
-    var key = keys[i]
-      , value = obj[key]
-    var r = iterator(value, key)
-    if(r) return r
-  }
-}
-
-var find = exports.find = function (obj, iterator) { 
-  iterator = rx(iterator)
-  return findReturn (obj, function (v, k) {
-    var r = iterator(v, k)
-    if(r) return v
-  })
-}
-
-var findKey = exports.findKey = function (obj, iterator) { 
-  iterator = rx(iterator)
-  return findReturn (obj, function (v, k) {
-    var r = iterator(v, k)
-    if(r) return k
-  })
-}
-
-var filter = exports.filter = function (obj, iterator){
-  iterator = rx (iterator)
-
-  if(Array.isArray(obj))
-    return obj.filter(iterator)
-  
-  var keys = Object.keys(obj)
-    , r = {}
-  keys.forEach(function (key){
-    var v
-    if(iterator(v = obj[key],key,obj))
-      r[key] = v
-  })
-  return r 
-}
-
-var mapKeys = exports.mapKeys = function (ary, iterator){
-  var r = {}
-  iterator = rx(iterator)
-  each(ary, function (v,k){
-    r[v] = iterator(v,k)
-  })
-  return r
-}
-
-
-var mapToArray = exports.mapToArray = function (ary, iterator){
-  var r = []
-  iterator = rx(iterator)
-  each(ary, function (v,k){
-    r.push(iterator(v,k))
-  })
-  return r
-}
-
-var path = exports.path = function (object, path) {
-
-  for (var i in path) {
-    if(object == null) return undefined
-    var key = path[i]
-    object = object[key]
-  }
-  return object
-}
-
-/*
-NOTE: naive implementation. 
-`match` must not contain circular references.
-*/
-
-var setPath = exports.setPath = function (object, path, value) {
-
-  for (var i in path) {
-    var key = path[i]
-    if(object[key] == null) object[key] = ( 
-      i + 1 == path.length ? value : {}
-    )
-    object = object[key]
-  }
-}
-
-
-});
-
-require.define("/node_modules/scuttlebutt/node_modules/duplex/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/scuttlebutt/node_modules/duplex/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
-
-module.exports = function (write, end) {
-  var stream = new Stream() 
-  var buffer = [], ended = false, destroyed = false, emitEnd
-  stream.writable = stream.readable = true
-  stream.paused = false
-  stream._paused = false
-  stream.buffer = buffer
-  
-  stream
-    .on('pause', function () {
-      stream._paused = true
-    })
-    .on('drain', function () {
-      stream._paused = false
-    })
-   
-  function destroySoon () {
-    process.nextTick(stream.destroy.bind(stream))
-  }
-
-  if(write)
-    stream.on('_data', write)
-  if(end)
-    stream.on('_end', end)
-
-  //destroy the stream once both ends are over
-  //but do it in nextTick, so that other listeners
-  //on end have time to respond
-  stream.once('end', function () { 
-    stream.readable = false
-    if(!stream.writable) {
-      process.nextTick(function () {
-        stream.destroy()
-      })
-    }
-  })
-
-  stream.once('_end', function () { 
-    stream.writable = false
-    if(!stream.readable)
-      stream.destroy()
-  })
-
-  // this is the default write method,
-  // if you overide it, you are resposible
-  // for pause state.
-
-  
-  stream._data = function (data) {
-    if(!stream.paused && !buffer.length)
-      stream.emit('data', data)
-    else 
-      buffer.push(data)
-    return !(stream.paused || buffer.length)
-  }
-
-  stream._end = function (data) { 
-    if(data) stream._data(data)
-    if(emitEnd) return
-    emitEnd = true
-    //destroy is handled above.
-    stream.drain()
-  }
-
-  stream.write = function (data) {
-    stream.emit('_data', data)
-    return !stream._paused
-  }
-
-  stream.end = function () {
-    stream.writable = false
-    if(stream.ended) return
-    stream.ended = true
-    stream.emit('_end')
-  }
-
-  stream.drain = function () {
-    if(!buffer.length && !emitEnd) return
-    //if the stream is paused after just before emitEnd()
-    //end should be buffered.
-    while(!stream.paused) {
-      if(buffer.length) {
-        stream.emit('data', buffer.shift())
-        if(buffer.length == 0) {
-          stream.emit('_drain')
-        }
-      }
-      else if(emitEnd && stream.readable) {
-        stream.readable = false
-        stream.emit('end')
-        return
-      } else {
-        //if the buffer has emptied. emit drain.
-        return true
-      }
-    }
-  }
-  var started = false
-  stream.resume = function () {
-    //this is where I need pauseRead, and pauseWrite.
-    //here the reading side is unpaused,
-    //but the writing side may still be paused.
-    //the whole buffer might not empity at once.
-    //it might pause again.
-    //the stream should never emit data inbetween pause()...resume()
-    //and write should return !buffer.length
-    started = true
-    stream.paused = false
-    stream.drain() //will emit drain if buffer empties.
-    return stream
-  }
-
-  stream.destroy = function () {
-    if(destroyed) return
-    destroyed = ended = true     
-    buffer.length = 0
-    stream.emit('close')
-  }
-  var pauseCalled = false
-  stream.pause = function () {
-    started = true
-    stream.paused = true
-    stream.emit('_pause')
-    return stream
-  }
-  stream._pause = function () {
-    if(!stream._paused) {
-      stream._paused = true
-      stream.emit('pause')
-    }
-    return this
-  }
-  stream.paused = true
-  process.nextTick(function () {
-    //unless the user manually paused
-    if(started) return
-    stream.resume()
-  })
- 
-  return stream
-}
-
-
-});
-
-require.define("/node_modules/scuttlebutt/node_modules/stream-serializer/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/scuttlebutt/node_modules/stream-serializer/index.js",function(require,module,exports,__dirname,__filename,process,global){
-var EventEmitter = require('events').EventEmitter
-
-exports = module.exports = function (wrapper) {
-
-  if('function' == typeof wrapper)
-    return wrapper
-  
-  return exports[wrapper] || exports.json
-}
-
-exports.json = function (stream) {
-
-  var write = stream.write
-  var soFar = ''
-
-  function parse (line) {
-    var js
-    try {
-      js = JSON.parse(line)
-      //ignore lines of whitespace...
-    } catch (err) { 
-      return console.error('invalid JSON', line)
-    }
-    if(js !== undefined)
-      write.call(stream, js)
-  }
-
-  function onData (data) {
-    var lines = (soFar + data).split('\n')
-    soFar = lines.pop()
-    while(lines.length) {
-      parse(lines.shift())
-    }
-  }
-
-  stream.write = onData
-  
-  var end = stream.end
-
-  stream.end = function (data) {
-    if(data)
-      stream.write(data)
-    //if there is any left over...
-    if(soFar) {
-      parse(soFar)
-    }
-    return end.call(stream)
-  }
-
-  stream.emit = function (event, data) {
-
-    if(event == 'data') {
-      data = JSON.stringify(data) + '\n'
-    }
-    //since all stream events only use one argument, this is okay...
-    EventEmitter.prototype.emit.call(stream, event, data)
-  }
-
-  return stream
-//  return es.pipeline(es.split(), es.parse(), stream, es.stringify())
-}
-
-exports.raw = function (stream) {
-  return stream
-}
-
-
-});
-
-require.define("/node_modules/scuttlebutt/util.js",function(require,module,exports,__dirname,__filename,process,global){exports.createId = 
-function () {
-  return [1,1,1].map(function () {
-    return Math.random().toString(16).substring(2).toUpperCase()
-  }).join('')
-}
-
-exports.filter = function (update, sources) {
-  var ts = update[1]
-  var source = update[2]
-  return (!sources || !sources[source] || sources[source] < ts)
-}
-
-});
-
-require.define("/node_modules/scuttlebutt/node_modules/monotonic-timestamp/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/scuttlebutt/node_modules/monotonic-timestamp/index.js",function(require,module,exports,__dirname,__filename,process,global){var _last = 0
-var _count = 1
-var LAST
-
-module.exports = 
-function () {
-  var t = Date.now()
-  var _t = t
-  if(_last == t) {
-    _t += ((_count++)/1000) 
-  } 
-  else _count = 1 
-
-  _last = t
-
-  if(_t === LAST)
-    throw new Error('LAST:' + LAST + ',' + _t)
-  LAST = _t
-  return _t
-}
-
-
-});
-
-require.define("/node_modules/duplex-emitter/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./index.js"}
-});
-
-require.define("/node_modules/duplex-emitter/index.js",function(require,module,exports,__dirname,__filename,process,global){var objectDuplexStream = require('./object_duplex_stream');
-var emitter = require('./emitter');
-
-function duplexToEmitter(duplexStream) {
-  return emitter(objectDuplexStream(duplexStream));
-}
-
-module.exports = duplexToEmitter;
-});
-
-require.define("/node_modules/duplex-emitter/object_duplex_stream.js",function(require,module,exports,__dirname,__filename,process,global){var JSONStream = require('JSONStream');
-var duplexer = require('duplexer');
-
-// Transforms a raw stream into an
-// object duplex stream
-function toObjectDuplex(stream) {
-
-  //// Write Stream (Server -> Client)
-
-  // Create a write stream that accepts objects
-  // and spits out JSON, newline separated
-  var objectWriteStream = JSONStream.stringify();
-
-  // Pipe the stream to the client
-  objectWriteStream.pipe(stream);
-
-
-  //// Read Stream (Client -> Server)
-
-  // Create a read stream that parses JSON
-  // and spits out objects
-  var objectReadStream = JSONStream.parse([true]);
-
-  // Pipe the client raw data into the json parser
-  stream.pipe(objectReadStream);
-
-  /// Smush together the write and read streams into
-  /// one duplex stream
-  var duplexStream = duplexer(objectWriteStream, objectReadStream);
-  
-  return duplexStream;
-}
-
-module.exports = toObjectDuplex;
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/JSONStream/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/JSONStream/index.js",function(require,module,exports,__dirname,__filename,process,global){var Parser = require('jsonparse')
-  , Stream = require('stream').Stream
-
-/*
-
-  the value of this.stack that creationix's jsonparse has is weird.
-
-  it makes this code ugly, but his problem is way harder that mine,
-  so i'll forgive him.
-
-*/
-
-exports.parse = function (path) {
-
-  var stream = new Stream()
-  var parser = new Parser()
-  var count = 0
-  if(!path || !path.length)
-    path = null
-  parser.onValue = function () {
-    if(!this.root && this.stack.length == 1){
-      stream.root = this.value
-      }
-    if(!path || this.stack.length !== path.length)
-      return
-    var _path = []
-    for( var i = 0; i < (path.length - 1); i++) {
-      var key = path[i]
-      var c = this.stack[1 + (+i)]
-
-      if(!c) {
-        return
-      }
-      var m = check(key, c.key)
-      _path.push(c.key)
-
-       if(!m)
-        return
-
-    }
-    var c = this
-
-    var key = path[path.length - 1]
-      var m = check(key, c.key)
-     if(!m)
-      return
-      _path.push(c.key)
-
-  count ++
-  stream.emit('data', this.value[this.key])
-  }
-
-  parser._onToken = parser.onToken;
-
-  parser.onToken = function (token, value) {
-    parser._onToken(token, value);
-    if (this.stack.length === 0) {
-      if (stream.root) {
-        if(!path)
-          stream.emit('data', stream.root)
-        stream.emit('root', stream.root, count)
-        count = 0;
-        stream.root = null;
-      }
-    }
-  }
-
-  parser.onError = function (err) {
-    stream.emit('error', err)
-  }
-  stream.readable = true
-  stream.writable = true
-  stream.write = function (chunk) {
-    if('string' === typeof chunk) {
-      if ('undefined' === typeof Buffer) {
-        var buf = new Array(chunk.length)
-        for (var i = 0; i < chunk.length; i++) buf[i] = chunk.charCodeAt(i)
-        chunk = new Int32Array(buf)
-      } else {
-        chunk = new Buffer(chunk)
-      }
-    }
-    parser.write(chunk)
-  }
-  stream.end = function (data) {
-    if(data)
-      stream.write(data)
-    stream.emit('end')
-  }
-
-  stream.destroy = function () {
-    stream.emit('close');
-  }
-
-  return stream
-}
-
-function check (x, y) {
-  if ('string' === typeof x)
-    return y == x
-  else if (x && 'function' === typeof x.exec)
-    return x.exec(y)
-  else if ('boolean' === typeof x)
-    return x
-  else if ('function' === typeof x)
-    return x(y)
-  return false
-}
-
-exports.stringify = function (op, sep, cl) {
-  if (op === false){
-    op = ''
-    sep = '\n'
-    cl = ''
-  } else if (op == null) {
-
-    op = '[\n'
-    sep = '\n,\n'
-    cl = '\n]\n'
-
-  }
-
-  //else, what ever you like
-
-  var stream = new Stream ()
-    , first = true
-    , ended = false
-    , anyData = false
-  stream.write = function (data) {
-    anyData = true
-    var json = JSON.stringify(data)
-    if(first) { first = false ; stream.emit('data', op + json)}
-    else stream.emit('data', sep + json)
-  }
-  stream.end = function (data) {
-    if(ended)
-      return
-    ended = true
-    if(data) stream.write(data)
-    if(!anyData) stream.emit('data', op)
-    stream.emit('data', cl)
-
-    stream.emit('end')
-  }
-  stream.writable = true
-  stream.readable = true
-
-  return stream
-}
-
-exports.stringifyObject = function (op, sep, cl) {
-  if (op === false){
-    op = ''
-    sep = '\n'
-    cl = ''
-  } else if (op == null) {
-
-    op = '{\n'
-    sep = '\n,\n'
-    cl = '\n}\n'
-
-  }
-
-  //else, what ever you like
-
-  var stream = new Stream ()
-    , first = true
-    , ended = false
-    , anyData = false
-  stream.write = function (data) {
-    anyData = true
-    var json = JSON.stringify(data[0]) + ':' + JSON.stringify(data[1])
-    if(first) { first = false ; stream.emit('data', op + json)}
-    else stream.emit('data', sep + json)
-  }
-  stream.end = function (data) {
-    if(ended) return
-    ended = true
-    if(data) stream.write(data)
-    if(!anyData) stream.emit('data', op)
-    stream.emit('data', cl)
-
-    stream.emit('end')
-  }
-  stream.writable = true
-  stream.readable = true
-
-  return stream
-}
-
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/JSONStream/node_modules/jsonparse/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"jsonparse.js"}
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/JSONStream/node_modules/jsonparse/jsonparse.js",function(require,module,exports,__dirname,__filename,process,global){/*global Buffer*/
-// Named constants with unique integer values
-var C = {};
-// Tokens
-var LEFT_BRACE    = C.LEFT_BRACE    = 0x1;
-var RIGHT_BRACE   = C.RIGHT_BRACE   = 0x2;
-var LEFT_BRACKET  = C.LEFT_BRACKET  = 0x3;
-var RIGHT_BRACKET = C.RIGHT_BRACKET = 0x4;
-var COLON         = C.COLON         = 0x5;
-var COMMA         = C.COMMA         = 0x6;
-var TRUE          = C.TRUE          = 0x7;
-var FALSE         = C.FALSE         = 0x8;
-var NULL          = C.NULL          = 0x9;
-var STRING        = C.STRING        = 0xa;
-var NUMBER        = C.NUMBER        = 0xb;
-// Tokenizer States
-var START   = C.START   = 0x11;
-var TRUE1   = C.TRUE1   = 0x21;
-var TRUE2   = C.TRUE2   = 0x22;
-var TRUE3   = C.TRUE3   = 0x23;
-var FALSE1  = C.FALSE1  = 0x31;
-var FALSE2  = C.FALSE2  = 0x32;
-var FALSE3  = C.FALSE3  = 0x33;
-var FALSE4  = C.FALSE4  = 0x34;
-var NULL1   = C.NULL1   = 0x41;
-var NULL2   = C.NULL3   = 0x42;
-var NULL3   = C.NULL2   = 0x43;
-var NUMBER1 = C.NUMBER1 = 0x51;
-var NUMBER2 = C.NUMBER2 = 0x52;
-var NUMBER3 = C.NUMBER3 = 0x53;
-var NUMBER4 = C.NUMBER4 = 0x54;
-var NUMBER5 = C.NUMBER5 = 0x55;
-var NUMBER6 = C.NUMBER6 = 0x56;
-var NUMBER7 = C.NUMBER7 = 0x57;
-var NUMBER8 = C.NUMBER8 = 0x58;
-var STRING1 = C.STRING1 = 0x61;
-var STRING2 = C.STRING2 = 0x62;
-var STRING3 = C.STRING3 = 0x63;
-var STRING4 = C.STRING4 = 0x64;
-var STRING5 = C.STRING5 = 0x65;
-var STRING6 = C.STRING6 = 0x66;
-// Parser States
-var VALUE   = C.VALUE   = 0x71;
-var KEY     = C.KEY     = 0x72;
-// Parser Modes
-var OBJECT  = C.OBJECT  = 0x81;
-var ARRAY   = C.ARRAY   = 0x82;
-
-// Slow code to string converter (only used when throwing syntax errors)
-function toknam(code) {
-  var keys = Object.keys(C);
-  for (var i = 0, l = keys.length; i < l; i++) {
-    var key = keys[i];
-    if (C[key] === code) { return key; }
-  }
-  return code && ("0x" + code.toString(16));
-}
-
-
-function Parser() {
-  this.tState = START;
-  this.value = undefined;
-
-  this.string = undefined; // string data
-  this.unicode = undefined; // unicode escapes
-
-  // For number parsing
-  this.negative = undefined;
-  this.magnatude = undefined;
-  this.position = undefined;
-  this.exponent = undefined;
-  this.negativeExponent = undefined;
-  
-  this.key = undefined;
-  this.mode = undefined;
-  this.stack = [];
-  this.state = VALUE;
-}
-var proto = Parser.prototype;
-proto.charError = function (buffer, i) {
-  this.onError(new Error("Unexpected " + JSON.stringify(String.fromCharCode(buffer[i])) + " at position " + i + " in state " + toknam(this.tState)));
-};
-proto.onError = function (err) { throw err; };
-proto.write = function (buffer) {
-  if (typeof buffer === "string") buffer = new Buffer(buffer);
-  //process.stdout.write("Input: ");
-  //console.dir(buffer.toString());
-  var n;
-  for (var i = 0, l = buffer.length; i < l; i++) {
-    if (this.tState === START){
-      n = buffer[i];
-      if(n === 0x7b){ this.onToken(LEFT_BRACE, "{"); // {
-      }else if(n === 0x7d){ this.onToken(RIGHT_BRACE, "}"); // }
-      }else if(n === 0x5b){ this.onToken(LEFT_BRACKET, "["); // [
-      }else if(n === 0x5d){ this.onToken(RIGHT_BRACKET, "]"); // ]
-      }else if(n === 0x3a){ this.onToken(COLON, ":");  // :
-      }else if(n === 0x2c){ this.onToken(COMMA, ","); // ,
-      }else if(n === 0x74){ this.tState = TRUE1;  // t
-      }else if(n === 0x66){ this.tState = FALSE1;  // f
-      }else if(n === 0x6e){ this.tState = NULL1; // n
-      }else if(n === 0x22){ this.string = ""; this.tState = STRING1; // "
-      }else if(n === 0x2d){ this.negative = true; this.tState = NUMBER1; // -
-      }else if(n === 0x30){ this.magnatude = 0; this.tState = NUMBER2; // 0
-      }else{
-        if (n > 0x30 && n < 0x40) { // 1-9
-          this.magnatude = n - 0x30; this.tState = NUMBER3;
-        } else if (n === 0x20 || n === 0x09 || n === 0x0a || n === 0x0d) {
-          // whitespace
-        } else { this.charError(buffer, i); }
-      }
-    }else if (this.tState === STRING1){ // After open quote
-      n = buffer[i];
-      if (n >= 128) {
-        for (var j = i; buffer[j] >= 128 && j < buffer.length; j++);
-        this.string += buffer.slice(i, j).toString();
-        i = j - 1;
-      } else if (n === 0x22) { this.tState = START; this.onToken(STRING, this.string); this.string = undefined; }
-      else if (n === 0x5c) { this.tState = STRING2; }
-      else if (n >= 0x20) { this.string += String.fromCharCode(n); }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === STRING2){ // After backslash
-      n = buffer[i];
-      if(n === 0x22){ this.string += "\""; this.tState = STRING1;
-      }else if(n === 0x5c){ this.string += "\\"; this.tState = STRING1; 
-      }else if(n === 0x2f){ this.string += "\/"; this.tState = STRING1; 
-      }else if(n === 0x62){ this.string += "\b"; this.tState = STRING1; 
-      }else if(n === 0x66){ this.string += "\f"; this.tState = STRING1; 
-      }else if(n === 0x6e){ this.string += "\n"; this.tState = STRING1; 
-      }else if(n === 0x72){ this.string += "\r"; this.tState = STRING1; 
-      }else if(n === 0x74){ this.string += "\t"; this.tState = STRING1; 
-      }else if(n === 0x75){ this.unicode = ""; this.tState = STRING3;
-      }else{ 
-        this.charError(buffer, i); 
-      }
-    }else if (this.tState === STRING3 || this.tState === STRING4 || this.tState === STRING5 || this.tState === STRING6){ // unicode hex codes
-      n = buffer[i];
-      // 0-9 A-F a-f
-      if ((n >= 0x30 && n < 0x40) || (n > 0x40 && n <= 0x46) || (n > 0x60 && n <= 0x66)) {
-        this.unicode += String.fromCharCode(n);
-        if (this.tState++ === STRING6) {
-          this.string += String.fromCharCode(parseInt(this.unicode, 16));
-          this.unicode = undefined;
-          this.tState = STRING1; 
-        }
-      } else {
-        this.charError(buffer, i);
-      }
-    }else if (this.tState === NUMBER1){ // after minus
-      n = buffer[i];
-      if (n === 0x30) { this.magnatude = 0; this.tState = NUMBER2; }
-      else if (n > 0x30 && n < 0x40) { this.magnatude = n - 0x30; this.tState = NUMBER3; }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === NUMBER2){ // * After initial zero
-      n = buffer[i];
-      if(n === 0x2e){ // .
-        this.position = 0.1; this.tState = NUMBER4;
-      }else if(n === 0x65 ||  n === 0x45){ // e/E
-        this.exponent = 0; this.tState = NUMBER6;
-      }else{
-        this.tState = START;
-        this.onToken(NUMBER, 0);
-        this.magnatude = undefined;
-        this.negative = undefined;
-        i--;
-      }
-    }else if (this.tState === NUMBER3){ // * After digit (before period)
-      n = buffer[i];
-      if(n === 0x2e){ // .
-        this.position = 0.1; this.tState = NUMBER4;
-      }else if(n === 0x65 || n === 0x45){ // e/E
-        this.exponent = 0; this.tState = NUMBER6;
-      }else{
-        if (n >= 0x30 && n < 0x40) { this.magnatude = this.magnatude * 10 + n - 0x30; }
-        else {
-          this.tState = START; 
-          if (this.negative) {
-            this.magnatude = -this.magnatude;
-            this.negative = undefined;
-          }
-          this.onToken(NUMBER, this.magnatude); 
-          this.magnatude = undefined;
-          i--;
-        }
-      }
-    }else if (this.tState === NUMBER4){ // After period
-      n = buffer[i];
-      if (n >= 0x30 && n < 0x40) { // 0-9
-        this.magnatude += this.position * (n - 0x30);
-        this.position /= 10;
-        this.tState = NUMBER5; 
-      } else { this.charError(buffer, i); }
-    }else if (this.tState === NUMBER5){ // * After digit (after period)
-      n = buffer[i];
-      if (n >= 0x30 && n < 0x40) { // 0-9
-        this.magnatude += this.position * (n - 0x30);
-        this.position /= 10;
-      }
-      else if (n === 0x65 || n === 0x45) { this.exponent = 0; this.tState = NUMBER6; } // E/e
-      else {
-        this.tState = START; 
-        if (this.negative) {
-          this.magnatude = -this.magnatude;
-          this.negative = undefined;
-        }
-        this.onToken(NUMBER, this.negative ? -this.magnatude : this.magnatude); 
-        this.magnatude = undefined;
-        this.position = undefined;
-        i--; 
-      }
-    }else if (this.tState === NUMBER6){ // After E
-      n = buffer[i];
-      if (n === 0x2b || n === 0x2d) { // +/-
-        if (n === 0x2d) { this.negativeExponent = true; }
-        this.tState = NUMBER7;
-      }
-      else if (n >= 0x30 && n < 0x40) {
-        this.exponent = this.exponent * 10 + (n - 0x30);
-        this.tState = NUMBER8;
-      }
-      else { this.charError(buffer, i); }  
-    }else if (this.tState === NUMBER7){ // After +/-
-      n = buffer[i];
-      if (n >= 0x30 && n < 0x40) { // 0-9
-        this.exponent = this.exponent * 10 + (n - 0x30);
-        this.tState = NUMBER8;
-      }
-      else { this.charError(buffer, i); }  
-    }else if (this.tState === NUMBER8){ // * After digit (after +/-)
-      n = buffer[i];
-      if (n >= 0x30 && n < 0x40) { // 0-9
-        this.exponent = this.exponent * 10 + (n - 0x30);
-      }
-      else {
-        if (this.negativeExponent) {
-          this.exponent = -this.exponent;
-          this.negativeExponent = undefined;
-        }
-        this.magnatude *= Math.pow(10, this.exponent);
-        this.exponent = undefined;
-        if (this.negative) { 
-          this.magnatude = -this.magnatude;
-          this.negative = undefined;
-        }
-        this.tState = START;
-        this.onToken(NUMBER, this.magnatude);
-        this.magnatude = undefined;
-        i--; 
-      } 
-    }else if (this.tState === TRUE1){ // r
-      if (buffer[i] === 0x72) { this.tState = TRUE2; }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === TRUE2){ // u
-      if (buffer[i] === 0x75) { this.tState = TRUE3; }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === TRUE3){ // e
-      if (buffer[i] === 0x65) { this.tState = START; this.onToken(TRUE, true); }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === FALSE1){ // a
-      if (buffer[i] === 0x61) { this.tState = FALSE2; }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === FALSE2){ // l
-      if (buffer[i] === 0x6c) { this.tState = FALSE3; }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === FALSE3){ // s
-      if (buffer[i] === 0x73) { this.tState = FALSE4; }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === FALSE4){ // e
-      if (buffer[i] === 0x65) { this.tState = START; this.onToken(FALSE, false); }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === NULL1){ // u
-      if (buffer[i] === 0x75) { this.tState = NULL2; }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === NULL2){ // l
-      if (buffer[i] === 0x6c) { this.tState = NULL3; }
-      else { this.charError(buffer, i); }
-    }else if (this.tState === NULL3){ // l
-      if (buffer[i] === 0x6c) { this.tState = START; this.onToken(NULL, null); }
-      else { this.charError(buffer, i); }
-    }
-  }
-};
-proto.onToken = function (token, value) {
-  // Override this to get events
-};
-
-proto.parseError = function (token, value) {
-  this.onError(new Error("Unexpected " + toknam(token) + (value ? ("(" + JSON.stringify(value) + ")") : "") + " in state " + toknam(this.state)));
-};
-proto.onError = function (err) { throw err; };
-proto.push = function () {
-  this.stack.push({value: this.value, key: this.key, mode: this.mode});
-};
-proto.pop = function () {
-  var value = this.value;
-  var parent = this.stack.pop();
-  this.value = parent.value;
-  this.key = parent.key;
-  this.mode = parent.mode;
-  this.emit(value);
-  if (!this.mode) { this.state = VALUE; }
-};
-proto.emit = function (value) {
-  if (this.mode) { this.state = COMMA; }
-  this.onValue(value);
-};
-proto.onValue = function (value) {
-  // Override me
-};  
-proto.onToken = function (token, value) {
-  //console.log("OnToken: state=%s token=%s %s", toknam(this.state), toknam(token), value?JSON.stringify(value):"");
-  if(this.state === VALUE){
-    if(token === STRING || token === NUMBER || token === TRUE || token === FALSE || token === NULL){
-      if (this.value) {
-        this.value[this.key] = value;
-      }
-      this.emit(value);  
-    }else if(token === LEFT_BRACE){
-      this.push();
-      if (this.value) {
-        this.value = this.value[this.key] = {};
-      } else {
-        this.value = {};
-      }
-      this.key = undefined;
-      this.state = KEY;
-      this.mode = OBJECT;
-    }else if(token === LEFT_BRACKET){
-      this.push();
-      if (this.value) {
-        this.value = this.value[this.key] = [];
-      } else {
-        this.value = [];
-      }
-      this.key = 0;
-      this.mode = ARRAY;
-      this.state = VALUE;
-    }else if(token === RIGHT_BRACE){
-      if (this.mode === OBJECT) {
-        this.pop();
-      } else {
-        this.parseError(token, value);
-      }
-    }else if(token === RIGHT_BRACKET){
-      if (this.mode === ARRAY) {
-        this.pop();
-      } else {
-        this.parseError(token, value);
-      }
-    }else{
-      this.parseError(token, value);
-    }
-  }else if(this.state === KEY){
-    if (token === STRING) {
-      this.key = value;
-      this.state = COLON;
-    } else if (token === RIGHT_BRACE) {
-      this.pop();
-    } else {
-      this.parseError(token, value);
-    }
-  }else if(this.state === COLON){
-    if (token === COLON) { this.state = VALUE; }
-    else { this.parseError(token, value); }
-  }else if(this.state === COMMA){
-    if (token === COMMA) { 
-      if (this.mode === ARRAY) { this.key++; this.state = VALUE; }
-      else if (this.mode === OBJECT) { this.state = KEY; }
-
-    } else if (token === RIGHT_BRACKET && this.mode === ARRAY || token === RIGHT_BRACE && this.mode === OBJECT) {
-      this.pop();
-    } else {
-      this.parseError(token, value);
-    }
-  }else{
-    this.parseError(token, value);
-  }
-};
-
-module.exports = Parser;
-
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/duplexer/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index"}
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/duplexer/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require("stream")
-    , writeMethods = ["write", "end", "destroy"]
-    , readMethods = ["resume", "pause"]
-    , readEvents = ["data", "close"]
-    , slice = Array.prototype.slice
-
-module.exports = duplex
-
-function duplex(writer, reader) {
-    var stream = new Stream()
-        , ended = false
-
-    Object.defineProperties(stream, {
-        writable: {
-            get: getWritable
-        }
-        , readable: {
-            get: getReadable
-        }
-    })
-
-    writeMethods.forEach(proxyWriter)
-
-    readMethods.forEach(proxyReader)
-
-    readEvents.forEach(proxyStream)
-
-    reader.on("end", handleEnd)
-
-    writer.on("error", reemit)
-    reader.on("error", reemit)
-
-    return stream
-
-    function getWritable() {
-        return writer.writable
-    }
-
-    function getReadable() {
-        return reader.readable
-    }
-
-    function proxyWriter(methodName) {
-        stream[methodName] = method
-
-        function method() {
-            return writer[methodName].apply(writer, arguments)
-        }
-    }
-
-    function proxyReader(methodName) {
-        stream[methodName] = method
-
-        function method() {
-            stream.emit(methodName)
-            var func = reader[methodName]
-            if (func) {
-                return func.apply(reader, arguments)
-            }
-            reader.emit(methodName)
-        }
-    }
-
-    function proxyStream(methodName) {
-        reader.on(methodName, reemit)
-
-        function reemit() {
-            var args = slice.call(arguments)
-            args.unshift(methodName)
-            stream.emit.apply(stream, args)
-        }
-    }
-
-    function handleEnd() {
-        if (ended) {
-            return
-        }
-        ended = true
-        var args = slice.call(arguments)
-        args.unshift("end")
-        stream.emit.apply(stream, args)
-    }
-
-    function reemit(err) {
-        stream.emit("error", err)
-    }
-}
-});
-
-require.define("/node_modules/duplex-emitter/emitter.js",function(require,module,exports,__dirname,__filename,process,global){var EventEmitter = require('events').EventEmitter;
-var emitStream = require('emit-stream');
-
-function emitter(stream) {
-  // Read events from the client
-  var readEmitter = emitStream.fromStream(stream);
-
-  stream.on('error', function(err) {
-    readEmitter.emit('error', err);
-  });
-
-  // Write events to the client
-  var writeEmitter = new EventEmitter;
-  var writeStream = emitStream.toStream(writeEmitter);
-
-  writeStream.on('error', function(err) {
-    readEmitter.emit('error', err);
-  });
-
-  writeStream.pipe(stream);
-
-  var on = readEmitter.on.bind(readEmitter);
-
-  return {
-    on: on,
-    addListener: on,
-    once: readEmitter.once.bind(readEmitter),
-    removeListener: readEmitter.removeListener.bind(readEmitter),
-    emit: writeEmitter.emit.bind(writeEmitter)
-  };
-}
-
-module.exports = emitter;
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/emit-stream/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/emit-stream/index.js",function(require,module,exports,__dirname,__filename,process,global){var EventEmitter = require('events').EventEmitter;
-var through = require('through');
-
-exports = module.exports = function (ev) {
-    if (typeof ev.pipe === 'function') {
-        return exports.fromStream(ev);
-    }
-    else return exports.toStream(ev)
-};
-
-exports.toStream = function (ev) {
-    var s = through(
-        function write (args) {
-            this.emit('data', args);
-        },
-        function end () {
-            var ix = ev._emitStreams.indexOf(s);
-            ev._emitStreams.splice(ix, 1);
-        }
-    );
-    
-    if (!ev._emitStreams) {
-        ev._emitStreams = [];
-        
-        var emit = ev.emit;
-        ev.emit = function () {
-            if (s.writable) {
-                var args = [].slice.call(arguments);
-                ev._emitStreams.forEach(function (es) {
-                    es.write(args);
-                });
-            }
-            emit.apply(ev, arguments);
-        };
-    }
-    ev._emitStreams.push(s);
-    
-    return s;
-};
-
-exports.fromStream = function (s) {
-    var ev = new EventEmitter;
-    
-    s.pipe(through(function (args) {
-        ev.emit.apply(ev, args);
-    }));
-    
-    return ev;
-};
-
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/emit-stream/node_modules/through/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
-});
-
-require.define("/node_modules/duplex-emitter/node_modules/emit-stream/node_modules/through/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
-
-// through
-//
-// a stream that does nothing but re-emit the input.
-// useful for aggregating a series of changing but not ending streams into one stream)
-
-exports = module.exports = through
-through.through = through
-
-//create a readable writable stream.
-
-function through (write, end) {
-  write = write || function (data) { this.emit('data', data) }
-  end = end || function () { this.emit('end') }
-
-  var ended = false, destroyed = false
-  var stream = new Stream()
-  stream.readable = stream.writable = true
-  stream.paused = false  
-  stream.write = function (data) {
-    write.call(this, data)
-    return !stream.paused
-  }
-  //this will be registered as the first 'end' listener
-  //must call destroy next tick, to make sure we're after any
-  //stream piped from here. 
-  stream.on('end', function () {
-    stream.readable = false
-    if(!stream.writable)
-      process.nextTick(function () {
-        stream.destroy()
-      })
-  })
-
-  stream.end = function (data) {
-    if(ended) return 
-    //this breaks, because pipe doesn't check writable before calling end.
-    //throw new Error('cannot call end twice')
-    ended = true
-    if(arguments.length) stream.write(data)
-    this.writable = false
-    end.call(this)
-    if(!this.readable)
-      this.destroy()
-  }
-  stream.destroy = function () {
-    if(destroyed) return
-    destroyed = true
-    ended = true
-    stream.writable = stream.readable = false
-    stream.emit('close')
-  }
-  stream.pause = function () {
-    if(stream.paused) return
-    stream.paused = true
-    stream.emit('pause')
-  }
-  stream.resume = function () {
-    if(stream.paused) {
-      stream.paused = false
-      stream.emit('drain')
-    }
-  }
-  return stream
-}
-
-
-});
-
-require.define("/node_modules/voxel-simplex-terrain/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
-});
-
-require.define("/node_modules/voxel-simplex-terrain/index.js",function(require,module,exports,__dirname,__filename,process,global){var SimplexNoise = require('simplex-noise')
-var Alea = require('alea')
-var voxel = require('voxel')
-
-module.exports = function generate(opts) {
-  if (!opts) opts = {}
-  if (typeof opts === 'string') opts = {seed: opts}
-  var seed = opts.seed || ~~(Math.random()*10000000)
-  var alea = new Alea(seed)
-  function seedFunc() { return alea() }
-  var simplex = new SimplexNoise(seedFunc)
-  var chunkDistance = opts.chunkDistance || 2
-  var chunkSize = opts.chunkSize || 32
-  var scaleFactor = opts.scaleFactor || chunkDistance * chunkSize
-
-  var width = chunkDistance * 2 * chunkSize
-  var lowerLeft = [0, 0]
-  var upperRight = [width, width]
-  
-  getMaterialIndex = opts.getMaterialIndex || getMaterialIndex
-  
-  return function getChunk(l, h) {
-    var fromLow = chunkSize * -chunkDistance
-    var fromHigh = chunkSize * chunkDistance
-    var toLow = lowerLeft[0]
-    var toHigh = upperRight[0]
-    return voxel.generate(l, h, function(x, y, z, n) {
-      return getMaterialIndex(seed, simplex, width, x, y, z)
-    })
-  }
-}
-
-function getMaterialIndex(seed, simplex, width, x, y, z) {
-  // the contents of this function come from 
-  // https://github.com/jwagner/voxelworlds/
-  var intensity = 16
-  var xd = x-width*0.25,
-      yd = y-width*0.20,
-      zd = z-width*0.25;
-  if(yd > 0) yd *= yd*0.05;
-  var xz = simplex.noise2D(x, z);
-  var distance = (xd*xd+yd*yd*intensity+zd*zd)*0.0004,
-      density = simplex.noise3D(x/intensity, y/intensity, z/intensity)-distance;
-  if(density > -0.75){
-      return 3;
-  }
-  if(density > -0.85){
-      return 2;
-  }
-  if(density > -1.0){
-      return y > intensity+xz*4 ? 1 : 2;
-  }
-  
-  // makes spikey things
-  if(seed[0] === "6"){
-  var density0 = simplex.noise3D(x/intensity, intensity, z/intensity);
-      if(density0-xd*xd*0.002-zd*zd*0.002 > -1.0 && y > intensity && y*0.01 < simplex.noise2D(x/4, z/4)*simplex.noise2D(x/intensity, z/intensity)){
-      return y > (intensity * 1.5)+xz*(intensity/2) ? 5 : 4;
-  }
-  }
-
-  // makes rocky outcroppings
-  if(seed[0] != '0'){
-      if(density > -0.50-y*0.01+simplex.noise2D(x/4, z/4)*simplex.noise2D(x/intensity+5, z/intensity+5)){
-          return 3;
-      }
-  }
-
-  return 0.0;
-}
-
-function scale( x, fromLow, fromHigh, toLow, toHigh ) {
-  return ( x - fromLow ) * ( toHigh - toLow ) / ( fromHigh - fromLow ) + toLow
-}
-;
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/simplex-noise/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./simplex-noise"}
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/simplex-noise/simplex-noise.js",function(require,module,exports,__dirname,__filename,process,global){/*
- * A fast javascript implementation of simplex noise by Jonas Wagner
- *
- * Based on a speed-improved simplex noise algorithm for 2D, 3D and 4D in Java.
- * Which is based on example code by Stefan Gustavson (stegu@itn.liu.se).
- * With Optimisations by Peter Eastman (peastman@drizzle.stanford.edu).
- * Better rank ordering method by Stefan Gustavson in 2012.
- *
- *
- * Copyright (C) 2012 Jonas Wagner
- *
- * Permission is hereby granted, free of charge, to any person obtaining
- * a copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
- * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
- * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
- * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
- */
-(function () {
-
-var F2 = 0.5 * (Math.sqrt(3.0) - 1.0),
-    G2 = (3.0 - Math.sqrt(3.0)) / 6.0,
-    F3 = 1.0 / 3.0,
-    G3 = 1.0 / 6.0,
-    F4 = (Math.sqrt(5.0) - 1.0) / 4.0,
-    G4 = (5.0 - Math.sqrt(5.0)) / 20.0;
-
-
-function SimplexNoise(random) {
-    if (!random) random = Math.random;
-    this.p = new Uint8Array(256);
-    this.perm = new Uint8Array(512);
-    this.permMod12 = new Uint8Array(512);
-    for (var i = 0; i < 256; i++) {
-        this.p[i] = random() * 256;
-    }
-    for (i = 0; i < 512; i++) {
-        this.perm[i] = this.p[i & 255];
-        this.permMod12[i] = this.perm[i] % 12;
-    }
-
-}
-SimplexNoise.prototype = {
-    grad3: new Float32Array([1, 1, 0,
-                            - 1, 1, 0,
-                            1, - 1, 0,
-
-                            - 1, - 1, 0,
-                            1, 0, 1,
-                            - 1, 0, 1,
-
-                            1, 0, - 1,
-                            - 1, 0, - 1,
-                            0, 1, 1,
-
-                            0, - 1, 1,
-                            0, 1, - 1,
-                            0, - 1, - 1]),
-    grad4: new Float32Array([0, 1, 1, 1, 0, 1, 1, - 1, 0, 1, - 1, 1, 0, 1, - 1, - 1,
-                            0, - 1, 1, 1, 0, - 1, 1, - 1, 0, - 1, - 1, 1, 0, - 1, - 1, - 1,
-                            1, 0, 1, 1, 1, 0, 1, - 1, 1, 0, - 1, 1, 1, 0, - 1, - 1,
-                            - 1, 0, 1, 1, - 1, 0, 1, - 1, - 1, 0, - 1, 1, - 1, 0, - 1, - 1,
-                            1, 1, 0, 1, 1, 1, 0, - 1, 1, - 1, 0, 1, 1, - 1, 0, - 1,
-                            - 1, 1, 0, 1, - 1, 1, 0, - 1, - 1, - 1, 0, 1, - 1, - 1, 0, - 1,
-                            1, 1, 1, 0, 1, 1, - 1, 0, 1, - 1, 1, 0, 1, - 1, - 1, 0,
-                            - 1, 1, 1, 0, - 1, 1, - 1, 0, - 1, - 1, 1, 0, - 1, - 1, - 1, 0]),
-    noise2D: function (xin, yin) {
-        var permMod12 = this.permMod12,
-            perm = this.perm,
-            grad3 = this.grad3;
-        var n0, n1, n2; // Noise contributions from the three corners
-        // Skew the input space to determine which simplex cell we're in
-        var s = (xin + yin) * F2; // Hairy factor for 2D
-        var i = Math.floor(xin + s);
-        var j = Math.floor(yin + s);
-        var t = (i + j) * G2;
-        var X0 = i - t; // Unskew the cell origin back to (x,y) space
-        var Y0 = j - t;
-        var x0 = xin - X0; // The x,y distances from the cell origin
-        var y0 = yin - Y0;
-        // For the 2D case, the simplex shape is an equilateral triangle.
-        // Determine which simplex we are in.
-        var i1, j1; // Offsets for second (middle) corner of simplex in (i,j) coords
-        if (x0 > y0) {
-            i1 = 1;
-            j1 = 0;
-        } // lower triangle, XY order: (0,0)->(1,0)->(1,1)
-        else {
-            i1 = 0;
-            j1 = 1;
-        } // upper triangle, YX order: (0,0)->(0,1)->(1,1)
-        // A step of (1,0) in (i,j) means a step of (1-c,-c) in (x,y), and
-        // a step of (0,1) in (i,j) means a step of (-c,1-c) in (x,y), where
-        // c = (3-sqrt(3))/6
-        var x1 = x0 - i1 + G2; // Offsets for middle corner in (x,y) unskewed coords
-        var y1 = y0 - j1 + G2;
-        var x2 = x0 - 1.0 + 2.0 * G2; // Offsets for last corner in (x,y) unskewed coords
-        var y2 = y0 - 1.0 + 2.0 * G2;
-        // Work out the hashed gradient indices of the three simplex corners
-        var ii = i & 255;
-        var jj = j & 255;
-        // Calculate the contribution from the three corners
-        var t0 = 0.5 - x0 * x0 - y0 * y0;
-        if (t0 < 0) n0 = 0.0;
-        else {
-            var gi0 = permMod12[ii + perm[jj]] * 3;
-            t0 *= t0;
-            n0 = t0 * t0 * (grad3[gi0] * x0 + grad3[gi0 + 1] * y0); // (x,y) of grad3 used for 2D gradient
-        }
-        var t1 = 0.5 - x1 * x1 - y1 * y1;
-        if (t1 < 0) n1 = 0.0;
-        else {
-            var gi1 = permMod12[ii + i1 + perm[jj + j1]] * 3;
-            t1 *= t1;
-            n1 = t1 * t1 * (grad3[gi1] * x1 + grad3[gi1 + 1] * y1);
-        }
-        var t2 = 0.5 - x2 * x2 - y2 * y2;
-        if (t2 < 0) n2 = 0.0;
-        else {
-            var gi2 = permMod12[ii + 1 + perm[jj + 1]] * 3;
-            t2 *= t2;
-            n2 = t2 * t2 * (grad3[gi2] * x2 + grad3[gi2 + 1] * y2);
-        }
-        // Add contributions from each corner to get the final noise value.
-        // The result is scaled to return values in the interval [-1,1].
-        return 70.0 * (n0 + n1 + n2);
-    },
-    // 3D simplex noise
-    noise3D: function (xin, yin, zin) {
-        var permMod12 = this.permMod12,
-            perm = this.perm,
-            grad3 = this.grad3;
-        var n0, n1, n2, n3; // Noise contributions from the four corners
-        // Skew the input space to determine which simplex cell we're in
-        var s = (xin + yin + zin) * F3; // Very nice and simple skew factor for 3D
-        var i = Math.floor(xin + s);
-        var j = Math.floor(yin + s);
-        var k = Math.floor(zin + s);
-        var t = (i + j + k) * G3;
-        var X0 = i - t; // Unskew the cell origin back to (x,y,z) space
-        var Y0 = j - t;
-        var Z0 = k - t;
-        var x0 = xin - X0; // The x,y,z distances from the cell origin
-        var y0 = yin - Y0;
-        var z0 = zin - Z0;
-        // For the 3D case, the simplex shape is a slightly irregular tetrahedron.
-        // Determine which simplex we are in.
-        var i1, j1, k1; // Offsets for second corner of simplex in (i,j,k) coords
-        var i2, j2, k2; // Offsets for third corner of simplex in (i,j,k) coords
-        if (x0 >= y0) {
-            if (y0 >= z0) {
-                i1 = 1;
-                j1 = 0;
-                k1 = 0;
-                i2 = 1;
-                j2 = 1;
-                k2 = 0;
-            } // X Y Z order
-            else if (x0 >= z0) {
-                i1 = 1;
-                j1 = 0;
-                k1 = 0;
-                i2 = 1;
-                j2 = 0;
-                k2 = 1;
-            } // X Z Y order
-            else {
-                i1 = 0;
-                j1 = 0;
-                k1 = 1;
-                i2 = 1;
-                j2 = 0;
-                k2 = 1;
-            } // Z X Y order
-        }
-        else { // x0<y0
-            if (y0 < z0) {
-                i1 = 0;
-                j1 = 0;
-                k1 = 1;
-                i2 = 0;
-                j2 = 1;
-                k2 = 1;
-            } // Z Y X order
-            else if (x0 < z0) {
-                i1 = 0;
-                j1 = 1;
-                k1 = 0;
-                i2 = 0;
-                j2 = 1;
-                k2 = 1;
-            } // Y Z X order
-            else {
-                i1 = 0;
-                j1 = 1;
-                k1 = 0;
-                i2 = 1;
-                j2 = 1;
-                k2 = 0;
-            } // Y X Z order
-        }
-        // A step of (1,0,0) in (i,j,k) means a step of (1-c,-c,-c) in (x,y,z),
-        // a step of (0,1,0) in (i,j,k) means a step of (-c,1-c,-c) in (x,y,z), and
-        // a step of (0,0,1) in (i,j,k) means a step of (-c,-c,1-c) in (x,y,z), where
-        // c = 1/6.
-        var x1 = x0 - i1 + G3; // Offsets for second corner in (x,y,z) coords
-        var y1 = y0 - j1 + G3;
-        var z1 = z0 - k1 + G3;
-        var x2 = x0 - i2 + 2.0 * G3; // Offsets for third corner in (x,y,z) coords
-        var y2 = y0 - j2 + 2.0 * G3;
-        var z2 = z0 - k2 + 2.0 * G3;
-        var x3 = x0 - 1.0 + 3.0 * G3; // Offsets for last corner in (x,y,z) coords
-        var y3 = y0 - 1.0 + 3.0 * G3;
-        var z3 = z0 - 1.0 + 3.0 * G3;
-        // Work out the hashed gradient indices of the four simplex corners
-        var ii = i & 255;
-        var jj = j & 255;
-        var kk = k & 255;
-        // Calculate the contribution from the four corners
-        var t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0;
-        if (t0 < 0) n0 = 0.0;
-        else {
-            var gi0 = permMod12[ii + perm[jj + perm[kk]]] * 3;
-            t0 *= t0;
-            n0 = t0 * t0 * (grad3[gi0] * x0 + grad3[gi0 + 1] * y0 + grad3[gi0 + 2] * z0);
-        }
-        var t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1;
-        if (t1 < 0) n1 = 0.0;
-        else {
-            var gi1 = permMod12[ii + i1 + perm[jj + j1 + perm[kk + k1]]] * 3;
-            t1 *= t1;
-            n1 = t1 * t1 * (grad3[gi1] * x1 + grad3[gi1 + 1] * y1 + grad3[gi1 + 2] * z1);
-        }
-        var t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2;
-        if (t2 < 0) n2 = 0.0;
-        else {
-            var gi2 = permMod12[ii + i2 + perm[jj + j2 + perm[kk + k2]]] * 3;
-            t2 *= t2;
-            n2 = t2 * t2 * (grad3[gi2] * x2 + grad3[gi2 + 1] * y2 + grad3[gi2 + 2] * z2);
-        }
-        var t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3;
-        if (t3 < 0) n3 = 0.0;
-        else {
-            var gi3 = permMod12[ii + 1 + perm[jj + 1 + perm[kk + 1]]] * 3;
-            t3 *= t3;
-            n3 = t3 * t3 * (grad3[gi3] * x3 + grad3[gi3 + 1] * y3 + grad3[gi3 + 2] * z3);
-        }
-        // Add contributions from each corner to get the final noise value.
-        // The result is scaled to stay just inside [-1,1]
-        return 32.0 * (n0 + n1 + n2 + n3);
-    },
-    // 4D simplex noise, better simplex rank ordering method 2012-03-09
-    noise4D: function (x, y, z, w) {
-        var permMod12 = this.permMod12,
-            perm = this.perm,
-            grad4 = this.grad4;
-
-        var n0, n1, n2, n3, n4; // Noise contributions from the five corners
-        // Skew the (x,y,z,w) space to determine which cell of 24 simplices we're in
-        var s = (x + y + z + w) * F4; // Factor for 4D skewing
-        var i = Math.floor(x + s);
-        var j = Math.floor(y + s);
-        var k = Math.floor(z + s);
-        var l = Math.floor(w + s);
-        var t = (i + j + k + l) * G4; // Factor for 4D unskewing
-        var X0 = i - t; // Unskew the cell origin back to (x,y,z,w) space
-        var Y0 = j - t;
-        var Z0 = k - t;
-        var W0 = l - t;
-        var x0 = x - X0; // The x,y,z,w distances from the cell origin
-        var y0 = y - Y0;
-        var z0 = z - Z0;
-        var w0 = w - W0;
-        // For the 4D case, the simplex is a 4D shape I won't even try to describe.
-        // To find out which of the 24 possible simplices we're in, we need to
-        // determine the magnitude ordering of x0, y0, z0 and w0.
-        // Six pair-wise comparisons are performed between each possible pair
-        // of the four coordinates, and the results are used to rank the numbers.
-        var rankx = 0;
-        var ranky = 0;
-        var rankz = 0;
-        var rankw = 0;
-        if (x0 > y0) rankx++;
-        else ranky++;
-        if (x0 > z0) rankx++;
-        else rankz++;
-        if (x0 > w0) rankx++;
-        else rankw++;
-        if (y0 > z0) ranky++;
-        else rankz++;
-        if (y0 > w0) ranky++;
-        else rankw++;
-        if (z0 > w0) rankz++;
-        else rankw++;
-        var i1, j1, k1, l1; // The integer offsets for the second simplex corner
-        var i2, j2, k2, l2; // The integer offsets for the third simplex corner
-        var i3, j3, k3, l3; // The integer offsets for the fourth simplex corner
-        // simplex[c] is a 4-vector with the numbers 0, 1, 2 and 3 in some order.
-        // Many values of c will never occur, since e.g. x>y>z>w makes x<z, y<w and x<w
-        // impossible. Only the 24 indices which have non-zero entries make any sense.
-        // We use a thresholding to set the coordinates in turn from the largest magnitude.
-        // Rank 3 denotes the largest coordinate.
-        i1 = rankx >= 3 ? 1 : 0;
-        j1 = ranky >= 3 ? 1 : 0;
-        k1 = rankz >= 3 ? 1 : 0;
-        l1 = rankw >= 3 ? 1 : 0;
-        // Rank 2 denotes the second largest coordinate.
-        i2 = rankx >= 2 ? 1 : 0;
-        j2 = ranky >= 2 ? 1 : 0;
-        k2 = rankz >= 2 ? 1 : 0;
-        l2 = rankw >= 2 ? 1 : 0;
-        // Rank 1 denotes the second smallest coordinate.
-        i3 = rankx >= 1 ? 1 : 0;
-        j3 = ranky >= 1 ? 1 : 0;
-        k3 = rankz >= 1 ? 1 : 0;
-        l3 = rankw >= 1 ? 1 : 0;
-        // The fifth corner has all coordinate offsets = 1, so no need to compute that.
-        var x1 = x0 - i1 + G4; // Offsets for second corner in (x,y,z,w) coords
-        var y1 = y0 - j1 + G4;
-        var z1 = z0 - k1 + G4;
-        var w1 = w0 - l1 + G4;
-        var x2 = x0 - i2 + 2.0 * G4; // Offsets for third corner in (x,y,z,w) coords
-        var y2 = y0 - j2 + 2.0 * G4;
-        var z2 = z0 - k2 + 2.0 * G4;
-        var w2 = w0 - l2 + 2.0 * G4;
-        var x3 = x0 - i3 + 3.0 * G4; // Offsets for fourth corner in (x,y,z,w) coords
-        var y3 = y0 - j3 + 3.0 * G4;
-        var z3 = z0 - k3 + 3.0 * G4;
-        var w3 = w0 - l3 + 3.0 * G4;
-        var x4 = x0 - 1.0 + 4.0 * G4; // Offsets for last corner in (x,y,z,w) coords
-        var y4 = y0 - 1.0 + 4.0 * G4;
-        var z4 = z0 - 1.0 + 4.0 * G4;
-        var w4 = w0 - 1.0 + 4.0 * G4;
-        // Work out the hashed gradient indices of the five simplex corners
-        var ii = i & 255;
-        var jj = j & 255;
-        var kk = k & 255;
-        var ll = l & 255;
-        // Calculate the contribution from the five corners
-        var t0 = 0.6 - x0 * x0 - y0 * y0 - z0 * z0 - w0 * w0;
-        if (t0 < 0) n0 = 0.0;
-        else {
-            var gi0 = (perm[ii + perm[jj + perm[kk + perm[ll]]]] % 32) * 4;
-            t0 *= t0;
-            n0 = t0 * t0 * (grad4[gi0] * x0 + grad4[gi0 + 1] * y0 + grad4[gi0 + 2] * z0 + grad4[gi0 + 3] * w0);
-        }
-        var t1 = 0.6 - x1 * x1 - y1 * y1 - z1 * z1 - w1 * w1;
-        if (t1 < 0) n1 = 0.0;
-        else {
-            var gi1 = (perm[ii + i1 + perm[jj + j1 + perm[kk + k1 + perm[ll + l1]]]] % 32) * 4;
-            t1 *= t1;
-            n1 = t1 * t1 * (grad4[gi1] * x1 + grad4[gi1 + 1] * y1 + grad4[gi1 + 2] * z1 + grad4[gi1 + 3] * w1);
-        }
-        var t2 = 0.6 - x2 * x2 - y2 * y2 - z2 * z2 - w2 * w2;
-        if (t2 < 0) n2 = 0.0;
-        else {
-            var gi2 = (perm[ii + i2 + perm[jj + j2 + perm[kk + k2 + perm[ll + l2]]]] % 32) * 4;
-            t2 *= t2;
-            n2 = t2 * t2 * (grad4[gi2] * x2 + grad4[gi2 + 1] * y2 + grad4[gi2 + 2] * z2 + grad4[gi2 + 3] * w2);
-        }
-        var t3 = 0.6 - x3 * x3 - y3 * y3 - z3 * z3 - w3 * w3;
-        if (t3 < 0) n3 = 0.0;
-        else {
-            var gi3 = (perm[ii + i3 + perm[jj + j3 + perm[kk + k3 + perm[ll + l3]]]] % 32) * 4;
-            t3 *= t3;
-            n3 = t3 * t3 * (grad4[gi3] * x3 + grad4[gi3 + 1] * y3 + grad4[gi3 + 2] * z3 + grad4[gi3 + 3] * w3);
-        }
-        var t4 = 0.6 - x4 * x4 - y4 * y4 - z4 * z4 - w4 * w4;
-        if (t4 < 0) n4 = 0.0;
-        else {
-            var gi4 = (perm[ii + 1 + perm[jj + 1 + perm[kk + 1 + perm[ll + 1]]]] % 32) * 4;
-            t4 *= t4;
-            n4 = t4 * t4 * (grad4[gi4] * x4 + grad4[gi4 + 1] * y4 + grad4[gi4 + 2] * z4 + grad4[gi4 + 3] * w4);
-        }
-        // Sum up and scale the result to cover the range [-1,1]
-        return 27.0 * (n0 + n1 + n2 + n3 + n4);
-    }
-
-
-};
-
-// amd
-if (typeof define !== 'undefined' && define.amd) define(function(){return SimplexNoise;});
-// browser
-else if (typeof window !== 'undefined') window.SimplexNoise = SimplexNoise;
-//common js
-if (typeof exports !== 'undefined') exports.SimplexNoise = SimplexNoise;
-// nodejs
-if (typeof module !== 'undefined') {
-    module.exports = SimplexNoise;
-}
-
-})();
-
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/alea/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"alea.js"}
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/alea/alea.js",function(require,module,exports,__dirname,__filename,process,global){(function (root, factory) {
-  if (typeof exports === 'object') {
-      module.exports = factory();
-  } else if (typeof define === 'function' && define.amd) {
-      define(factory);
-  } else {
-      root.returnExports = factory();
-  }
-}(this, function () {
-
-  'use strict';
-
-  // From http://baagoe.com/en/RandomMusings/javascript/
-
-  // importState to sync generator states
-  Alea.importState = function(i){
-    var random = new Alea();
-    random.importState(i);
-    return random;
-  };
-
-  return Alea;
-
-  function Alea() {
-    return (function(args) {
-      // Johannes Baagøe <baagoe@baagoe.com>, 2010
-      var s0 = 0;
-      var s1 = 0;
-      var s2 = 0;
-      var c = 1;
-
-      if (args.length == 0) {
-        args = [+new Date];
-      }
-      var mash = Mash();
-      s0 = mash(' ');
-      s1 = mash(' ');
-      s2 = mash(' ');
-
-      for (var i = 0; i < args.length; i++) {
-        s0 -= mash(args[i]);
-        if (s0 < 0) {
-          s0 += 1;
-        }
-        s1 -= mash(args[i]);
-        if (s1 < 0) {
-          s1 += 1;
-        }
-        s2 -= mash(args[i]);
-        if (s2 < 0) {
-          s2 += 1;
-        }
-      }
-      mash = null;
-
-      var random = function() {
-        var t = 2091639 * s0 + c * 2.3283064365386963e-10; // 2^-32
-        s0 = s1;
-        s1 = s2;
-        return s2 = t - (c = t | 0);
-      };
-      random.uint32 = function() {
-        return random() * 0x100000000; // 2^32
-      };
-      random.fract53 = function() {
-        return random() + 
-          (random() * 0x200000 | 0) * 1.1102230246251565e-16; // 2^-53
-      };
-      random.version = 'Alea 0.9';
-      random.args = args;
-
-      // my own additions to sync state between two generators
-      random.exportState = function(){
-        return [s0, s1, s2, c];
-      };
-      random.importState = function(i){
-        s0 = +i[0] || 0;
-        s1 = +i[1] || 0;
-        s2 = +i[2] || 0;
-        c = +i[3] || 0;
-      };
- 
-      return random;
-
-    } (Array.prototype.slice.call(arguments)));
-  }
-
-  function Mash() {
-    var n = 0xefc8249d;
-
-    var mash = function(data) {
-      data = data.toString();
-      for (var i = 0; i < data.length; i++) {
-        n += data.charCodeAt(i);
-        var h = 0.02519603282416938 * n;
-        n = h >>> 0;
-        h -= n;
-        h *= n;
-        n = h >>> 0;
-        h -= n;
-        n += h * 0x100000000; // 2^32
-      }
-      return (n >>> 0) * 2.3283064365386963e-10; // 2^-32
-    };
-
-    mash.version = 'Mash 0.9';
-    return mash;
-  }
-}));
-
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/voxel/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/voxel/index.js",function(require,module,exports,__dirname,__filename,process,global){var chunker = require('./chunker')
-
-module.exports = function(opts) {
-  if (!opts.generateVoxelChunk) opts.generateVoxelChunk = function(low, high) {
-    return generate(low, high, module.exports.generator['Valley'])
-  }
-  return chunker(opts)
-}
-
-module.exports.meshers = {
-  culled: require('./meshers/culled').mesher,
-  greedy: require('./meshers/greedy').mesher,
-  monotone: require('./meshers/monotone').mesher,
-  stupid: require('./meshers/stupid').mesher
-}
-
-module.exports.Chunker = chunker.Chunker
-module.exports.geometry = {}
-module.exports.generator = {}
-module.exports.generate = generate
-
-// from https://github.com/mikolalysenko/mikolalysenko.github.com/blob/master/MinecraftMeshes2/js/testdata.js#L4
-function generate(l, h, f) {
-  var d = [ h[0]-l[0], h[1]-l[1], h[2]-l[2] ]
-  var v = new Int8Array(d[0]*d[1]*d[2])
-  var n = 0
-  for(var k=l[2]; k<h[2]; ++k)
-  for(var j=l[1]; j<h[1]; ++j)
-  for(var i=l[0]; i<h[0]; ++i, ++n) {
-    v[n] = f(i,j,k,n)
-  }
-  return {voxels:v, dims:d}
-}
-
-// shape and terrain generator functions
-module.exports.generator['Sphere'] = function(i,j,k) {
-  return i*i+j*j+k*k <= 16*16 ? 1 : 0
-}
-
-module.exports.generator['Noise'] = function(i,j,k) {
-  return Math.random() < 0.1 ? Math.random() * 0xffffff : 0;
-}
-
-module.exports.generator['Dense Noise'] = function(i,j,k) {
-  return Math.round(Math.random() * 0xffffff);
-}
-
-module.exports.generator['Checker'] = function(i,j,k) {
-  return !!((i+j+k)&1) ? (((i^j^k)&2) ? 1 : 0xffffff) : 0;
-}
-
-module.exports.generator['Hill'] = function(i,j,k) {
-  return j <= 16 * Math.exp(-(i*i + k*k) / 64) ? 1 : 0;
-}
-
-module.exports.generator['Valley'] = function(i,j,k) {
-  return j <= (i*i + k*k) * 31 / (32*32*2) + 1 ? 1 : 0;
-}
-
-module.exports.generator['Hilly Terrain'] = function(i,j,k) {
-  var h0 = 3.0 * Math.sin(Math.PI * i / 12.0 - Math.PI * k * 0.1) + 27;    
-  if(j > h0+1) {
-    return 0;
-  }
-  if(h0 <= j) {
-    return 1;
-  }
-  var h1 = 2.0 * Math.sin(Math.PI * i * 0.25 - Math.PI * k * 0.3) + 20;
-  if(h1 <= j) {
-    return 2;
-  }
-  if(2 < j) {
-    return Math.random() < 0.1 ? 0x222222 : 0xaaaaaa;
-  }
-  return 3;
-}
-
-// convenience function that uses the above functions to prebake some simple voxel geometries
-module.exports.generateExamples = function() {
-  return {
-    'Sphere': generate([-16,-16,-16], [16,16,16], module.exports.generator['Sphere']),
-    'Noise': generate([0,0,0], [16,16,16], module.exports.generator['Noise']),
-    'Dense Noise': generate([0,0,0], [16,16,16], module.exports.generator['Dense Noise']),
-    'Checker': generate([0,0,0], [8,8,8], module.exports.generator['Checker']),
-    'Hill': generate([-16, 0, -16], [16,16,16], module.exports.generator['Hill']),
-    'Valley': generate([0,0,0], [32,32,32], module.exports.generator['Valley']),
-    'Hilly Terrain': generate([0, 0, 0], [32,32,32], module.exports.generator['Hilly Terrain'])
-  }
-}
-
-
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/voxel/chunker.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = function(opts) {
-  return new Chunker(opts)
-}
-
-module.exports.Chunker = Chunker
-
-function Chunker(opts) {
-  this.distance = opts.chunkDistance || 2
-  this.chunkSize = opts.chunkSize || 32
-  this.cubeSize = opts.cubeSize || 25
-  this.generateVoxelChunk = opts.generateVoxelChunk
-  this.chunks = {}
-  this.meshes = {}
-}
-
-Chunker.prototype.generateMissingChunks = function(position) {
-  var current = this.chunkAtPosition(position)
-  var x = current[0]
-  var y = current[1]
-  var z = current[2]
-  var dist = this.distance
-  for (var cx = (x - dist); cx !== (x + dist); ++cx) {
-    for (var cy = (y - dist); cy !== (y + dist); ++cy) {
-      for (var cz = (z - dist); cz !== (z + dist); ++cz) {
-        if (!this.chunks[[cx, cy, cz].join('|')]) {
-          this.generateChunk(cx, cy, cz)
-        }
-      }
-    }
-  }
-  return this.chunks
-}
-
-Chunker.prototype.getBounds = function(x, y, z) {
-  var size = this.chunkSize
-  var low = [x * size, y * size, z * size]
-  var high = [low[0] + size, low[1] + size, low[2] + size]
-  return [low, high]
-}
-
-Chunker.prototype.generateChunk = function(x, y, z) {
-  var self = this
-  var bounds = this.getBounds(x, y, z)
-  var chunk = this.generateVoxelChunk(bounds[0], bounds[1], x, y, z)
-  var position = [x, y, z]
-  chunk.position = position
-  this.chunks[position.join('|')] = chunk
-  return chunk
-}
-
-Chunker.prototype.chunkAtPosition = function(position) {
-  var chunkSize = this.chunkSize
-  var cubeSize = this.cubeSize
-  var cx = position.x / cubeSize / chunkSize
-  var cy = position.y / cubeSize / chunkSize
-  var cz = position.z / cubeSize / chunkSize
-  var chunkPos = [Math.floor(cx), Math.floor(cy), Math.floor(cz)]
-  return chunkPos
-};
-
-Chunker.prototype.voxelIndex = function(pos) {
-  var size = this.chunkSize
-  var v = this.voxelVector(pos)
-  var vidx = v.x + v.y*size + v.z*size*size
-  return vidx
-}
-
-Chunker.prototype.voxelAtPosition = function(pos, val) {
-  var ckey = this.chunkAtPosition(pos).join('|')
-  var chunk = this.chunks[ckey]
-  if (!chunk) return false
-  var vidx = this.voxelIndex(pos)
-  if (!vidx) return false
-  if (typeof val !== 'undefined') {
-    chunk.voxels[vidx] = val
-  }
-  var v = chunk.voxels[vidx]
-  return v
-}
-
-Chunker.prototype.voxelVector = function(pos) {
-  var size = this.chunkSize
-  var cubeSize = this.cubeSize
-  var vx = (size + Math.floor(pos.x / cubeSize) % size) % size
-  var vy = (size + Math.floor(pos.y / cubeSize) % size) % size
-  var vz = (size + Math.floor(pos.z / cubeSize) % size) % size
-  return {x: Math.abs(vx), y: Math.abs(vy), z: Math.abs(vz)}
-};
-
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/voxel/meshers/culled.js",function(require,module,exports,__dirname,__filename,process,global){//Naive meshing (with face culling)
-function CulledMesh(volume, dims) {
-  //Precalculate direction vectors for convenience
-  var dir = new Array(3);
-  for(var i=0; i<3; ++i) {
-    dir[i] = [[0,0,0], [0,0,0]];
-    dir[i][0][(i+1)%3] = 1;
-    dir[i][1][(i+2)%3] = 1;
-  }
-  //March over the volume
-  var vertices = []
-    , faces = []
-    , x = [0,0,0]
-    , B = [[false,true]    //Incrementally update bounds (this is a bit ugly)
-          ,[false,true]
-          ,[false,true]]
-    , n = -dims[0]*dims[1];
-  for(           B[2]=[false,true],x[2]=-1; x[2]<dims[2]; B[2]=[true,(++x[2]<dims[2]-1)])
-  for(n-=dims[0],B[1]=[false,true],x[1]=-1; x[1]<dims[1]; B[1]=[true,(++x[1]<dims[1]-1)])
-  for(n-=1,      B[0]=[false,true],x[0]=-1; x[0]<dims[0]; B[0]=[true,(++x[0]<dims[0]-1)], ++n) {
-    //Read current voxel and 3 neighboring voxels using bounds check results
-    var p =   (B[0][0] && B[1][0] && B[2][0]) ? volume[n]                 : 0
-      , b = [ (B[0][1] && B[1][0] && B[2][0]) ? volume[n+1]               : 0
-            , (B[0][0] && B[1][1] && B[2][0]) ? volume[n+dims[0]]         : 0
-            , (B[0][0] && B[1][0] && B[2][1]) ? volume[n+dims[0]*dims[1]] : 0
-          ];
-    //Generate faces
-    for(var d=0; d<3; ++d)
-    if((!!p) !== (!!b[d])) {
-      var s = !p ? 1 : 0;
-      var t = [x[0],x[1],x[2]]
-        , u = dir[d][s]
-        , v = dir[d][s^1];
-      ++t[d];
-      
-      var vertex_count = vertices.length;
-      vertices.push([t[0],           t[1],           t[2]          ]);
-      vertices.push([t[0]+u[0],      t[1]+u[1],      t[2]+u[2]     ]);
-      vertices.push([t[0]+u[0]+v[0], t[1]+u[1]+v[1], t[2]+u[2]+v[2]]);
-      vertices.push([t[0]     +v[0], t[1]     +v[1], t[2]     +v[2]]);
-      faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, s ? b[d] : p]);
-    }
-  }
-  return { vertices:vertices, faces:faces };
-}
-
-
-if(exports) {
-  exports.mesher = CulledMesh;
-}
-
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/voxel/meshers/greedy.js",function(require,module,exports,__dirname,__filename,process,global){var GreedyMesh = (function() {
-//Cache buffer internally
-var mask = new Int32Array(4096);
-
-return function(volume, dims) {
-  function f(i,j,k) {
-    return volume[i + dims[0] * (j + dims[1] * k)];
-  }
-  //Sweep over 3-axes
-  var vertices = [], faces = [];
-  for(var d=0; d<3; ++d) {
-    var i, j, k, l, w, h
-      , u = (d+1)%3
-      , v = (d+2)%3
-      , x = [0,0,0]
-      , q = [0,0,0];
-    if(mask.length < dims[u] * dims[v]) {
-      mask = new Int32Array(dims[u] * dims[v]);
-    }
-    q[d] = 1;
-    for(x[d]=-1; x[d]<dims[d]; ) {
-      //Compute mask
-      var n = 0;
-      for(x[v]=0; x[v]<dims[v]; ++x[v])
-      for(x[u]=0; x[u]<dims[u]; ++x[u], ++n) {
-        var a = (0    <= x[d]      ? f(x[0],      x[1],      x[2])      : 0)
-          , b = (x[d] <  dims[d]-1 ? f(x[0]+q[0], x[1]+q[1], x[2]+q[2]) : 0);
-        if((!!a) === (!!b) ) {
-          mask[n] = 0;
-        } else if(!!a) {
-          mask[n] = a;
-        } else {
-          mask[n] = -b;
-        }
-      }
-      //Increment x[d]
-      ++x[d];
-      //Generate mesh for mask using lexicographic ordering
-      n = 0;
-      for(j=0; j<dims[v]; ++j)
-      for(i=0; i<dims[u]; ) {
-        var c = mask[n];
-        if(!!c) {
-          //Compute width
-          for(w=1; c === mask[n+w] && i+w<dims[u]; ++w) {
-          }
-          //Compute height (this is slightly awkward
-          var done = false;
-          for(h=1; j+h<dims[v]; ++h) {
-            for(k=0; k<w; ++k) {
-              if(c !== mask[n+k+h*dims[u]]) {
-                done = true;
-                break;
-              }
-            }
-            if(done) {
-              break;
-            }
-          }
-          //Add quad
-          x[u] = i;  x[v] = j;
-          var du = [0,0,0]
-            , dv = [0,0,0]; 
-          if(c > 0) {
-            dv[v] = h;
-            du[u] = w;
-          } else {
-            c = -c;
-            du[v] = h;
-            dv[u] = w;
-          }
-          var vertex_count = vertices.length;
-          vertices.push([x[0],             x[1],             x[2]            ]);
-          vertices.push([x[0]+du[0],       x[1]+du[1],       x[2]+du[2]      ]);
-          vertices.push([x[0]+du[0]+dv[0], x[1]+du[1]+dv[1], x[2]+du[2]+dv[2]]);
-          vertices.push([x[0]      +dv[0], x[1]      +dv[1], x[2]      +dv[2]]);
-          faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, c]);
-          
-          //Zero-out mask
-          for(l=0; l<h; ++l)
-          for(k=0; k<w; ++k) {
-            mask[n+k+l*dims[u]] = 0;
-          }
-          //Increment counters and continue
-          i += w; n += w;
-        } else {
-          ++i;    ++n;
-        }
-      }
-    }
-  }
-  return { vertices:vertices, faces:faces };
-}
-})();
-
-if(exports) {
-  exports.mesher = GreedyMesh;
-}
-
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/voxel/meshers/monotone.js",function(require,module,exports,__dirname,__filename,process,global){"use strict";
-
-var MonotoneMesh = (function(){
-
-function MonotonePolygon(c, v, ul, ur) {
-  this.color  = c;
-  this.left   = [[ul, v]];
-  this.right  = [[ur, v]];
-};
-
-MonotonePolygon.prototype.close_off = function(v) {
-  this.left.push([ this.left[this.left.length-1][0], v ]);
-  this.right.push([ this.right[this.right.length-1][0], v ]);
-};
-
-MonotonePolygon.prototype.merge_run = function(v, u_l, u_r) {
-  var l = this.left[this.left.length-1][0]
-    , r = this.right[this.right.length-1][0]; 
-  if(l !== u_l) {
-    this.left.push([ l, v ]);
-    this.left.push([ u_l, v ]);
-  }
-  if(r !== u_r) {
-    this.right.push([ r, v ]);
-    this.right.push([ u_r, v ]);
-  }
-};
-
-
-return function(volume, dims) {
-  function f(i,j,k) {
-    return volume[i + dims[0] * (j + dims[1] * k)];
-  }
-  //Sweep over 3-axes
-  var vertices = [], faces = [];
-  for(var d=0; d<3; ++d) {
-    var i, j, k
-      , u = (d+1)%3   //u and v are orthogonal directions to d
-      , v = (d+2)%3
-      , x = new Int32Array(3)
-      , q = new Int32Array(3)
-      , runs = new Int32Array(2 * (dims[u]+1))
-      , frontier = new Int32Array(dims[u])  //Frontier is list of pointers to polygons
-      , next_frontier = new Int32Array(dims[u])
-      , left_index = new Int32Array(2 * dims[v])
-      , right_index = new Int32Array(2 * dims[v])
-      , stack = new Int32Array(24 * dims[v])
-      , delta = [[0,0], [0,0]];
-    //q points along d-direction
-    q[d] = 1;
-    //Initialize sentinel
-    for(x[d]=-1; x[d]<dims[d]; ) {
-      // --- Perform monotone polygon subdivision ---
-      var n = 0
-        , polygons = []
-        , nf = 0;
-      for(x[v]=0; x[v]<dims[v]; ++x[v]) {
-        //Make one pass over the u-scan line of the volume to run-length encode polygon
-        var nr = 0, p = 0, c = 0;
-        for(x[u]=0; x[u]<dims[u]; ++x[u], p = c) {
-          //Compute the type for this face
-          var a = (0    <= x[d]      ? f(x[0],      x[1],      x[2])      : 0)
-            , b = (x[d] <  dims[d]-1 ? f(x[0]+q[0], x[1]+q[1], x[2]+q[2]) : 0);
-          c = a;
-          if((!a) === (!b)) {
-            c = 0;
-          } else if(!a) {
-            c = -b;
-          }
-          //If cell type doesn't match, start a new run
-          if(p !== c) {
-            runs[nr++] = x[u];
-            runs[nr++] = c;
-          }
-        }
-        //Add sentinel run
-        runs[nr++] = dims[u];
-        runs[nr++] = 0;
-        //Update frontier by merging runs
-        var fp = 0;
-        for(var i=0, j=0; i<nf && j<nr-2; ) {
-          var p    = polygons[frontier[i]]
-            , p_l  = p.left[p.left.length-1][0]
-            , p_r  = p.right[p.right.length-1][0]
-            , p_c  = p.color
-            , r_l  = runs[j]    //Start of run
-            , r_r  = runs[j+2]  //End of run
-            , r_c  = runs[j+1]; //Color of run
-          //Check if we can merge run with polygon
-          if(r_r > p_l && p_r > r_l && r_c === p_c) {
-            //Merge run
-            p.merge_run(x[v], r_l, r_r);
-            //Insert polygon into frontier
-            next_frontier[fp++] = frontier[i];
-            ++i;
-            j += 2;
-          } else {
-            //Check if we need to advance the run pointer
-            if(r_r <= p_r) {
-              if(!!r_c) {
-                var n_poly = new MonotonePolygon(r_c, x[v], r_l, r_r);
-                next_frontier[fp++] = polygons.length;
-                polygons.push(n_poly);
-              }
-              j += 2;
-            }
-            //Check if we need to advance the frontier pointer
-            if(p_r <= r_r) {
-              p.close_off(x[v]);
-              ++i;
-            }
-          }
-        }
-        //Close off any residual polygons
-        for(; i<nf; ++i) {
-          polygons[frontier[i]].close_off(x[v]);
-        }
-        //Add any extra runs to frontier
-        for(; j<nr-2; j+=2) {
-          var r_l  = runs[j]
-            , r_r  = runs[j+2]
-            , r_c  = runs[j+1];
-          if(!!r_c) {
-            var n_poly = new MonotonePolygon(r_c, x[v], r_l, r_r);
-            next_frontier[fp++] = polygons.length;
-            polygons.push(n_poly);
-          }
-        }
-        //Swap frontiers
-        var tmp = next_frontier;
-        next_frontier = frontier;
-        frontier = tmp;
-        nf = fp;
-      }
-      //Close off frontier
-      for(var i=0; i<nf; ++i) {
-        var p = polygons[frontier[i]];
-        p.close_off(dims[v]);
-      }
-      // --- Monotone subdivision of polygon is complete at this point ---
-      
-      x[d]++;
-      
-      //Now we just need to triangulate each monotone polygon
-      for(var i=0; i<polygons.length; ++i) {
-        var p = polygons[i]
-          , c = p.color
-          , flipped = false;
-        if(c < 0) {
-          flipped = true;
-          c = -c;
-        }
-        for(var j=0; j<p.left.length; ++j) {
-          left_index[j] = vertices.length;
-          var y = [0.0,0.0,0.0]
-            , z = p.left[j];
-          y[d] = x[d];
-          y[u] = z[0];
-          y[v] = z[1];
-          vertices.push(y);
-        }
-        for(var j=0; j<p.right.length; ++j) {
-          right_index[j] = vertices.length;
-          var y = [0.0,0.0,0.0]
-            , z = p.right[j];
-          y[d] = x[d];
-          y[u] = z[0];
-          y[v] = z[1];
-          vertices.push(y);
-        }
-        //Triangulate the monotone polygon
-        var bottom = 0
-          , top = 0
-          , l_i = 1
-          , r_i = 1
-          , side = true;  //true = right, false = left
-        
-        stack[top++] = left_index[0];
-        stack[top++] = p.left[0][0];
-        stack[top++] = p.left[0][1];
-        
-        stack[top++] = right_index[0];
-        stack[top++] = p.right[0][0];
-        stack[top++] = p.right[0][1];
-        
-        while(l_i < p.left.length || r_i < p.right.length) {
-          //Compute next side
-          var n_side = false;
-          if(l_i === p.left.length) {
-            n_side = true;
-          } else if(r_i !== p.right.length) {
-            var l = p.left[l_i]
-              , r = p.right[r_i];
-            n_side = l[1] > r[1];
-          }
-          var idx = n_side ? right_index[r_i] : left_index[l_i]
-            , vert = n_side ? p.right[r_i] : p.left[l_i];
-          if(n_side !== side) {
-            //Opposite side
-            while(bottom+3 < top) {
-              if(flipped === n_side) {
-                faces.push([ stack[bottom], stack[bottom+3], idx, c]);
-              } else {
-                faces.push([ stack[bottom+3], stack[bottom], idx, c]);              
-              }
-              bottom += 3;
-            }
-          } else {
-            //Same side
-            while(bottom+3 < top) {
-              //Compute convexity
-              for(var j=0; j<2; ++j)
-              for(var k=0; k<2; ++k) {
-                delta[j][k] = stack[top-3*(j+1)+k+1] - vert[k];
-              }
-              var det = delta[0][0] * delta[1][1] - delta[1][0] * delta[0][1];
-              if(n_side === (det > 0)) {
-                break;
-              }
-              if(det !== 0) {
-                if(flipped === n_side) {
-                  faces.push([ stack[top-3], stack[top-6], idx, c ]);
-                } else {
-                  faces.push([ stack[top-6], stack[top-3], idx, c ]);
-                }
-              }
-              top -= 3;
-            }
-          }
-          //Push vertex
-          stack[top++] = idx;
-          stack[top++] = vert[0];
-          stack[top++] = vert[1];
-          //Update loop index
-          if(n_side) {
-            ++r_i;
-          } else {
-            ++l_i;
-          }
-          side = n_side;
-        }
-      }
-    }
-  }
-  return { vertices:vertices, faces:faces };
-}
-})();
-
-if(exports) {
-  exports.mesher = MonotoneMesh;
-}
-
-});
-
-require.define("/node_modules/voxel-simplex-terrain/node_modules/voxel/meshers/stupid.js",function(require,module,exports,__dirname,__filename,process,global){//The stupidest possible way to generate a Minecraft mesh (I think)
-function StupidMesh(volume, dims) {
-  var vertices = [], faces = [], x = [0,0,0], n = 0;
-  for(x[2]=0; x[2]<dims[2]; ++x[2])
-  for(x[1]=0; x[1]<dims[1]; ++x[1])
-  for(x[0]=0; x[0]<dims[0]; ++x[0], ++n)
-  if(!!volume[n]) {
-    for(var d=0; d<3; ++d) {
-      var t = [x[0], x[1], x[2]]
-        , u = [0,0,0]
-        , v = [0,0,0];
-      u[(d+1)%3] = 1;
-      v[(d+2)%3] = 1;
-      for(var s=0; s<2; ++s) {
-        t[d] = x[d] + s;
-        var tmp = u;
-        u = v;
-        v = tmp;
-        var vertex_count = vertices.length;
-        vertices.push([t[0],           t[1],           t[2]          ]);
-        vertices.push([t[0]+u[0],      t[1]+u[1],      t[2]+u[2]     ]);
-        vertices.push([t[0]+u[0]+v[0], t[1]+u[1]+v[1], t[2]+u[2]+v[2]]);
-        vertices.push([t[0]     +v[0], t[1]     +v[1], t[2]     +v[2]]);
-        faces.push([vertex_count, vertex_count+1, vertex_count+2, vertex_count+3, volume[n]]);
-      }
-    }
-  }
-  return { vertices:vertices, faces:faces };
-}
-
-
-if(exports) {
-  exports.mesher = StupidMesh;
-}
-
-});
-
-require.define("/node_modules/minecraft-skin/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
-});
-
-require.define("/node_modules/minecraft-skin/index.js",function(require,module,exports,__dirname,__filename,process,global){var THREE
+require.define("/node_modules/voxel-hello-world/node_modules/minecraft-skin/index.js",function(require,module,exports,__dirname,__filename,process,global){var THREE
 
 module.exports = function(three, image, sizeRatio) {
   return new Skin(three, image, sizeRatio)
@@ -84962,456 +80998,10 @@ Skin.prototype.createPlayerObject = function(scene) {
 }
 });
 
-require.define("/node_modules/toolbar/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-debris/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/toolbar/index.js",function(require,module,exports,__dirname,__filename,process,global){var keymaster = require('./lib/keymaster.js')
-var inherits = require('inherits')
-var events = require('events')
-
-var keyTable =
-  {   8 : 'backspace'
-  ,   9 : 'tab'
-  ,  13 : 'enter'
-  ,  16 : 'shift'
-  ,  17 : 'ctrl'
-  ,  18 : 'alt'
-  ,  19 : 'pausebreak'
-  ,  20 : 'capslock'
-  ,  27 : 'esc'
-  ,  32 : 'spacebar'
-  ,  33 : 'pageup'
-  ,  34 : 'pagedown'
-  ,  35 : 'end'
-  ,  36 : 'home'
-  ,  37 : 'left'
-  ,  38 : 'up'
-  ,  39 : 'right'
-  ,  40 : 'down'
-  ,  45 : 'ins'
-  ,  46 : 'del'
-  ,  48 : '0'
-  ,  49 : '1'
-  ,  50 : '2'
-  ,  51 : '3'
-  ,  52 : '4'
-  ,  53 : '5'
-  ,  54 : '6'
-  ,  55 : '7'
-  ,  56 : '8'
-  ,  57 : '9'
-  ,  65 : 'a'
-  ,  66 : 'b'
-  ,  67 : 'c'
-  ,  68 : 'd'
-  ,  69 : 'e'
-  ,  70 : 'f'
-  ,  71 : 'g'
-  ,  72 : 'h'
-  ,  73 : 'i'
-  ,  74 : 'j'
-  ,  75 : 'k'
-  ,  76 : 'l'
-  ,  77 : 'm'
-  ,  78 : 'n'
-  ,  79 : 'o'
-  ,  80 : 'p'
-  ,  81 : 'q'
-  ,  82 : 'r'
-  ,  83 : 's'
-  ,  84 : 't'
-  ,  85 : 'u'
-  ,  86 : 'v'
-  ,  87 : 'w'
-  ,  88 : 'x'
-  ,  89 : 'y'
-  ,  90 : 'z'
-  ,  93 : 'select'
-  ,  96 : 'num_0'
-  ,  97 : 'num_1'
-  ,  98 : 'num_2'
-  ,  99 : 'num_3'
-  , 100 : 'num_4'
-  , 101 : 'num_5'
-  , 102 : 'num_6'
-  , 103 : 'num_7'
-  , 104 : 'num_8'
-  , 105 : 'num_9'
-  , 106 : 'multiply'
-  , 107 : 'add'
-  , 109 : 'subtract'
-  , 110 : 'decimalpoint'
-  , 111 : 'divide'
-  , 112 : 'f1'
-  , 113 : 'f2'
-  , 114 : 'f3'
-  , 115 : 'f4'
-  , 116 : 'f5'
-  , 117 : 'f6'
-  , 118 : 'f7'
-  , 119 : 'f8'
-  , 120 : 'f9'
-  , 121 : 'f10'
-  , 122 : 'f11'
-  , 123 : 'f12'
-  , 144 : 'numlock'
-  , 145 : 'scrolllock'
-  , 186 : 'semicolon'
-  , 187 : 'equalsign'
-  , 188 : 'comma'
-  , 189 : 'dash'
-  , 190 : 'period'
-  , 191 : 'forwardslash'
-  , 192 : 'graveaccent'
-  , 219 : 'openbracket'
-  , 220 : 'backslash'
-  , 221 : 'closebraket'
-  , 222 : 'singlequote'
-}
-
-module.exports = function(opts) {
-  return new HUD(opts)
-}
-
-function HUD(opts) {
-  if (!(this instanceof HUD)) return new HUD(opts)
-  var self = this
-  if (!opts) opts = {}
-  this.el = opts.el || 'nav'
-  if (typeof this.el !== 'object') this.el = document.querySelector(this.el)
-  this.toolbarKeys = opts.toolbarKeys || ['1','2','3','4','5','6','7','8','9','0']
-  this.bindEvents()
-}
-
-inherits(HUD, events.EventEmitter)
-
-HUD.prototype.onKeyDown = function() {
-  var self = this
-  keymaster.getPressedKeyCodes().map(function(keyCode) {
-    var pressed = keyTable[keyCode]
-    if (self.toolbarKeys.indexOf(pressed) > -1) return self.switchToolbar(pressed)
-  })
-}
-
-HUD.prototype.bindEvents = function() {
-  var self = this
-  window.addEventListener('keydown', this.onKeyDown.bind(this))
-  var list = this.el.querySelectorAll('li')
-  list = Array.prototype.slice.call(list);
-  list.map(function(li) { 
-    li.addEventListener('click', self.onItemClick.bind(self))
-  })
-}
-
-HUD.prototype.onItemClick = function(ev) {
-  var idx = this.toolbarIndexOf(ev.currentTarget)
-  if (idx > -1) this.switchToolbar(idx)
-}
-
-HUD.prototype.addClass = function(el, className) {
-  if (!el) return
-  if (el.className === "") return el.className = className
-  var classes = el.className.split(' ')
-  classes.push(className)
-  el.className = classes.join(' ')
-  return classes
-}
-
-HUD.prototype.removeClass = function(el, className) {
-  if (!el) return
-  if (el.className === "") return
-  var classes = el.className.split(' ')
-  var idx = classes.indexOf(className)
-  if (idx > -1) classes.splice(idx, 1)
-  el.className = classes.join(' ')
-  return classes
-}
-
-HUD.prototype.toolbarIndexOf = function(li) {
-  var list = this.el.querySelectorAll('.tab-item') 
-  list = Array.prototype.slice.call(list)
-  var idx = list.indexOf(li)
-  if (idx > -1) ++idx
-  return idx
-}
-
-HUD.prototype.switchToolbar = function(num) {
-  this.removeClass(this.el.querySelector('.active'), 'active')
-  var selected = this.el.querySelectorAll('.tab-item')[+num-1]
-  this.addClass(selected, 'active')
-  var active = this.el.querySelector('.active .tab-label')
-  if (!active) return
-  this.emit('select', active.innerText)
-}
-});
-
-require.define("/node_modules/toolbar/lib/keymaster.js",function(require,module,exports,__dirname,__filename,process,global){//     keymaster.js
-//     (c) 2011-2012 Thomas Fuchs
-//     keymaster.js may be freely distributed under the MIT license.
-
-;(function(global){
-  var k,
-    _handlers = {},
-    _mods = { 16: false, 18: false, 17: false, 91: false },
-    _scope = 'all',
-    // modifier keys
-    _MODIFIERS = {
-      '⇧': 16, shift: 16,
-      '⌥': 18, alt: 18, option: 18,
-      '⌃': 17, ctrl: 17, control: 17,
-      '⌘': 91, command: 91
-    },
-    // special keys
-    _MAP = {
-      backspace: 8, tab: 9, clear: 12,
-      enter: 13, 'return': 13,
-      esc: 27, escape: 27, space: 32,
-      left: 37, up: 38,
-      right: 39, down: 40,
-      del: 46, 'delete': 46,
-      home: 36, end: 35,
-      pageup: 33, pagedown: 34,
-      ',': 188, '.': 190, '/': 191,
-      '`': 192, '-': 189, '=': 187,
-      ';': 186, '\'': 222,
-      '[': 219, ']': 221, '\\': 220
-    },
-    _downKeys = [];
-
-  for(k=1;k<20;k++) _MODIFIERS['f'+k] = 111+k;
-
-  // IE doesn't support Array#indexOf, so have a simple replacement
-  function index(array, item){
-    var i = array.length;
-    while(i--) if(array[i]===item) return i;
-    return -1;
-  }
-
-  // handle keydown event
-  function dispatch(event, scope){
-    var key, handler, k, i, modifiersMatch;
-    key = event.keyCode;
-
-    if (index(_downKeys, key) == -1) {
-        _downKeys.push(key);
-    }
-
-    // if a modifier key, set the key.<modifierkeyname> property to true and return
-    if(key == 93 || key == 224) key = 91; // right command on webkit, command on Gecko
-    if(key in _mods) {
-      _mods[key] = true;
-      // 'assignKey' from inside this closure is exported to window.key
-      for(k in _MODIFIERS) if(_MODIFIERS[k] == key) assignKey[k] = true;
-      return;
-    }
-
-    // see if we need to ignore the keypress (filter() can can be overridden)
-    // by default ignore key presses if a select, textarea, or input is focused
-    if(!assignKey.filter.call(this, event)) return;
-
-    // abort if no potentially matching shortcuts found
-    if (!(key in _handlers)) return;
-
-    // for each potential shortcut
-    for (i = 0; i < _handlers[key].length; i++) {
-      handler = _handlers[key][i];
-
-      // see if it's in the current scope
-      if(handler.scope == scope || handler.scope == 'all'){
-        // check if modifiers match if any
-        modifiersMatch = handler.mods.length > 0;
-        for(k in _mods)
-          if((!_mods[k] && index(handler.mods, +k) > -1) ||
-            (_mods[k] && index(handler.mods, +k) == -1)) modifiersMatch = false;
-        // call the handler and stop the event if neccessary
-        if((handler.mods.length == 0 && !_mods[16] && !_mods[18] && !_mods[17] && !_mods[91]) || modifiersMatch){
-          if(handler.method(event, handler)===false){
-            if(event.preventDefault) event.preventDefault();
-              else event.returnValue = false;
-            if(event.stopPropagation) event.stopPropagation();
-            if(event.cancelBubble) event.cancelBubble = true;
-          }
-        }
-      }
-    }
-  };
-
-  // unset modifier keys on keyup
-  function clearModifier(event){
-    var key = event.keyCode, k,
-        i = index(_downKeys, key);
-
-    // remove key from _downKeys
-    if (i >= 0) {
-        _downKeys.splice(i, 1);
-    }
-
-    if(key == 93 || key == 224) key = 91;
-    if(key in _mods) {
-      _mods[key] = false;
-      for(k in _MODIFIERS) if(_MODIFIERS[k] == key) assignKey[k] = false;
-    }
-  };
-
-  function resetModifiers() {
-    for(k in _mods) _mods[k] = false;
-    for(k in _MODIFIERS) assignKey[k] = false;
-  }
-
-  // parse and assign shortcut
-  function assignKey(key, scope, method){
-    var keys, mods, i, mi;
-    if (method === undefined) {
-      method = scope;
-      scope = 'all';
-    }
-    key = key.replace(/\s/g,'');
-    keys = key.split(',');
-
-    if((keys[keys.length-1])=='')
-      keys[keys.length-2] += ',';
-    // for each shortcut
-    for (i = 0; i < keys.length; i++) {
-      // set modifier keys if any
-      mods = [];
-      key = keys[i].split('+');
-      if(key.length > 1){
-        mods = key.slice(0,key.length-1);
-        for (mi = 0; mi < mods.length; mi++)
-          mods[mi] = _MODIFIERS[mods[mi]];
-        key = [key[key.length-1]];
-      }
-      // convert to keycode and...
-      key = key[0]
-      key = _MAP[key] || key.toUpperCase().charCodeAt(0);
-      // ...store handler
-      if (!(key in _handlers)) _handlers[key] = [];
-      _handlers[key].push({ shortcut: keys[i], scope: scope, method: method, key: keys[i], mods: mods });
-    }
-  };
-
-  // Returns true if the key with code 'keyCode' is currently down
-  // Converts strings into key codes.
-  function isPressed(keyCode) {
-      if (typeof(keyCode)=='string') {
-          if (keyCode.length == 1) {
-              keyCode = (keyCode.toUpperCase()).charCodeAt(0);
-          } else {
-              return false;
-          }
-      }
-      return index(_downKeys, keyCode) != -1;
-  }
-
-  function getPressedKeyCodes() {
-      return _downKeys.slice(0);
-  }
-
-  function filter(event){
-    var tagName = (event.target || event.srcElement).tagName;
-    // ignore keypressed in any elements that support keyboard data input
-    return !(tagName == 'INPUT' || tagName == 'SELECT' || tagName == 'TEXTAREA');
-  }
-
-  // initialize key.<modifier> to false
-  for(k in _MODIFIERS) assignKey[k] = false;
-
-  // set current scope (default 'all')
-  function setScope(scope){ _scope = scope || 'all' };
-  function getScope(){ return _scope || 'all' };
-
-  // delete all handlers for a given scope
-  function deleteScope(scope){
-    var key, handlers, i;
-
-    for (key in _handlers) {
-      handlers = _handlers[key];
-      for (i = 0; i < handlers.length; ) {
-        if (handlers[i].scope === scope) handlers.splice(i, 1);
-        else i++;
-      }
-    }
-  };
-
-  // cross-browser events
-  function addEvent(object, event, method) {
-    if (object.addEventListener)
-      object.addEventListener(event, method, false);
-    else if(object.attachEvent)
-      object.attachEvent('on'+event, function(){ method(window.event) });
-  };
-
-  // set the handlers globally on document
-  addEvent(document, 'keydown', function(event) { dispatch(event, _scope) }); // Passing _scope to a callback to ensure it remains the same by execution. Fixes #48
-  addEvent(document, 'keyup', clearModifier);
-
-  // reset modifiers to false whenever the window is (re)focused.
-  addEvent(window, 'focus', resetModifiers);
-
-  // store previously defined key
-  var previousKey = global.key;
-
-  // restore previously defined key and return reference to our key object
-  function noConflict() {
-    var k = global.key;
-    global.key = previousKey;
-    return k;
-  }
-
-  // set window.key and window.key.set/get/deleteScope, and the default filter
-  global.key = assignKey;
-  global.key.setScope = setScope;
-  global.key.getScope = getScope;
-  global.key.deleteScope = deleteScope;
-  global.key.filter = filter;
-  global.key.isPressed = isPressed;
-  global.key.getPressedKeyCodes = getPressedKeyCodes;
-  global.key.noConflict = noConflict;
-
-  if(typeof module !== 'undefined') module.exports = global.key;
-
-})(this);
-});
-
-require.define("/node_modules/toolbar/node_modules/inherits/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./inherits.js"}
-});
-
-require.define("/node_modules/toolbar/node_modules/inherits/inherits.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = inherits
-
-function inherits (c, p, proto) {
-  proto = proto || {}
-  var e = {}
-  ;[c.prototype, proto].forEach(function (s) {
-    Object.getOwnPropertyNames(s).forEach(function (k) {
-      e[k] = Object.getOwnPropertyDescriptor(s, k)
-    })
-  })
-  c.prototype = Object.create(p.prototype, e)
-  c.super = p
-}
-
-//function Child () {
-//  Child.super.call(this)
-//  console.error([this
-//                ,this.constructor
-//                ,this.constructor === Child
-//                ,this.constructor.super === Parent
-//                ,Object.getPrototypeOf(this) === Child.prototype
-//                ,Object.getPrototypeOf(Object.getPrototypeOf(this))
-//                 === Parent.prototype
-//                ,this instanceof Child
-//                ,this instanceof Parent])
-//}
-//function Parent () {}
-//inherits(Child, Parent)
-//new Child
-
-});
-
-require.define("/node_modules/voxel-debris/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
-});
-
-require.define("/node_modules/voxel-debris/index.js",function(require,module,exports,__dirname,__filename,process,global){var funstance = require('funstance');
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-debris/index.js",function(require,module,exports,__dirname,__filename,process,global){var funstance = require('funstance');
 var EventEmitter = require('events').EventEmitter;
 
 module.exports = function (game, opts) {
@@ -85495,10 +81085,10 @@ function createDebris (game, pos, value) {
 
 });
 
-require.define("/node_modules/voxel-debris/node_modules/funstance/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-debris/node_modules/funstance/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
 });
 
-require.define("/node_modules/voxel-debris/node_modules/funstance/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = function (obj, fn) {
+require.define("/node_modules/voxel-hello-world/node_modules/voxel-debris/node_modules/funstance/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = function (obj, fn) {
     var f = function () {
         if (typeof fn !== 'function') return;
         return fn.apply(obj, arguments);
@@ -85523,291 +81113,3246 @@ require.define("/node_modules/voxel-debris/node_modules/funstance/index.js",func
 
 });
 
-require.define("/client.js",function(require,module,exports,__dirname,__filename,process,global){var url = require('url')
-var voxel = require('voxel')
-var websocket = require('websocket-stream')
-var engine = require('voxel-engine')
-var playerPhysics = require('player-physics')
-var MuxDemux = require('mux-demux')
-var Model = require('scuttlebutt/model')
-var duplexEmitter = require('duplex-emitter')
-var simplex = require('voxel-simplex-terrain')
-//var AverageLatency = require('./latency')
-var skin = require('minecraft-skin')
-var toolbar = require('toolbar')
-var blockSelector = toolbar({el: '#tools'})
-var currentMaterial = 1
-var debris = require('voxel-debris')
+require.define("/node_modules/voxel-hello-world/node_modules/painterly-textures/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"painterly.js"}
+});
 
+require.define("/node_modules/voxel-hello-world/node_modules/painterly-textures/painterly.js",function(require,module,exports,__dirname,__filename,process,global){var path = require('path')
+var texturePath = __dirname + '/textures'
 
+module.exports = function(dir) {
+  return path.relative(dir, texturePath) + '/'
+}
 
-window.socket = websocket('ws://' + url.parse(window.location.href).host)
-var emitter
-var connected = false
-var mdm = MuxDemux()
-mdm.on('connection', function (stream) {
-  console.log("stream.meta: " + stream.meta)
-  if (stream.meta === "emitter") {
-	console.log("initing emitter.")
-    window.emitter = emitter = duplexEmitter(stream)
-    connected = true
+});
 
-    emitter.on('id', function(id) {
-      console.log('id', id)
-      playerID = id
-    })
-	
-	window.game = game = createGame()
+require.define("/node_modules/voxel-region-change/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
 
-    emitter.on('settings', function(settings) {
-          //window.game = game = createGame(settings)
-    	  //window.game = game = createGame()
-    	  console.log("starting game - setting generated.")
-          emitter.emit('generated', Date.now())
-        })
+require.define("/node_modules/voxel-region-change/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = coordinates
+ 
+var aabb = require('aabb-3d')
+var events = require('events')
+ 
+function coordinates(spatial, box, regionWidth) {
+  var emitter = new events.EventEmitter()
+  var lastRegion = [NaN, NaN, NaN]
+  var thisRegion
+
+  if (arguments.length === 2) {
+    regionWidth = box
+    box = aabb([-Infinity, -Infinity, -Infinity], [Infinity, Infinity, Infinity])
   }
-  if (stream.meta === "voxels") {
-    var voxels = new Model()
-    voxels.on('update', function(data, value) {
-          var val = data[1]
-          var pos = data[0].split('|')
-          var ckey = pos.splice(0,3).join('|')
-          pos = {x: +pos[0], y: +pos[1], z: +pos[2]}
-          var set = voxelAtChunkIndexAndVoxelVector(ckey, pos, val)
-          game.showChunk(game.voxels.chunks[ckey])
-        })
+
+  spatial.on('position', box, updateRegion)
   
-    stream.pipe(voxels.createStream()).pipe(stream)
-  }
-})
-socket.pipe(mdm).pipe(socket)
-socket.on('end', function() { connected = false })
-
-var playerID, game, viking, players = {}, lastProcessedSeq = 0
-window.localInputs = []
-
-function storeServerUpdate(update) {
-  discardOldLocalInputs(update)
-  // replays the state starting from the corrected state back to the present “predicted” time on the client using player inputs stored in the circular buffer. In effect the client invisibly “rewinds and replays” the last n frames of local player character movement while holding the rest of the world fixed.
-  var pos = game.controls.yawObject.position
-  var before = pos.clone()
-  pos.copy(update.position)
-  var distance = pos.distanceTo(update.position)
-  if (distance > 20) return console.log("Updating state -  " + " pos: " + pos + "; distance: " + distance)
-
-  updatePlayerPhysics(game.controls, game.scene, function(delta, input) {
-    Object.keys(input.movement).map(function(key) {
-      game.controls[key] = input.movement[key]
-    })    
-    game.controls.tick(delta, function() {
-      var bbox = game.playerAABB()
-      var beforeUpdate = pos.clone()
-      game.scene.updateMatrixWorld()
-      game.updatePlayerPhysics(bbox, game.controls)
-      console.log(beforeUpdate.distanceTo(pos))
-    })
-  })
-  var target = pos.clone()
-  pos.copy(before)
-  lerpMe(target)
-}
-
-function updatePlayerPhysics(physics, scene, cb) {
-  for (i = 0; i < localInputs.length; i++) {
-    var input = localInputs[i]
-    var delta = input.seq - lastProcessedSeq
-    if (delta < 0) return
-    if (cb) cb(delta, input)
-    lastProcessedSeq = input.seq
-  }
-}
-
-function discardOldLocalInputs(update) {
-  var lastProcessedIndex = 0
-  for (i = 0; i < localInputs.length; i++) {
-    if (localInputs[i].seq === update.seq) {
-      lastProcessedIndex = i
-      lastProcessedSeq = update.seq
-      break
+  function updateRegion(pos) {
+    thisRegion = [Math.floor(pos.x / regionWidth), Math.floor(pos.y / regionWidth), Math.floor(pos.z / regionWidth)]
+    if (thisRegion[0] !== lastRegion[0] || thisRegion[1] !== lastRegion[1] || thisRegion[2] !== lastRegion[2]) {
+      emitter.emit('change', thisRegion)
     }
+    lastRegion = thisRegion
   }
-  localInputs.splice(0, lastProcessedIndex + 1)
+ 
+  return emitter
+}
+});
+
+require.define("/node_modules/voxel-region-change/node_modules/aabb-3d/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+});
+
+require.define("/node_modules/voxel-region-change/node_modules/aabb-3d/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = AABB
+
+var vec3 = require('gl-matrix').vec3
+
+function AABB(pos, vec) {
+  if(!(this instanceof AABB)) {
+    return new AABB(pos, vec)
+  }
+
+  this.base = pos
+  this.vec = vec
+
+  this.mag = vec3.length(this.vec)
+
+  this.max = vec3.create()
+  vec3.add(this.max, this.base, this.vec)
 }
 
-window.players = players
+var cons = AABB
+  , proto = cons.prototype
 
-function voxelAtChunkIndexAndVoxelVector(ckey, v, val) {
-  var chunk = game.voxels.chunks[ckey]
-  if (!chunk) return
-  var size = game.voxels.chunkSize
-  var vidx = v.x + v.y*size + v.z*size*size
-  if (typeof val !== 'undefined') {
-    chunk.voxels[vidx] = val
-  }
-  var v = chunk.voxels[vidx]
-  return v
+proto.width = function() {
+  return this.vec[0]
 }
 
-function createGame(options) {
-	console.log("Creating the game now.")
-  // options.generateVoxelChunk = simplex({
-  //   seed: options.seed,
-  //   scaleFactor: options.scaleFactor,
-  //   chunkDistance: options.chunkDistance,
-  //   getMaterialIndex: function (seed, simplex, width, x, y, z) {
-  //     if (x*x + y*y + z*z > 30*30) return 0
-  //     return 1
-  //   }
-  // })
-  //game = engine(options)
-  var texturePath= "./textures/"
-  game = engine({
-    generate: voxel.generator['Valley'],
-    startingPosition: [185, 100, 0],
-    texturePath: texturePath,
-	worldOrigin: [185, 100, 0]
-  })
-  window.game = game // for debugging
-  game.fakeControls = {
-    moveForward: false,
-    moveBackward: false,
-    moveLeft: false,
-    moveRight: false
-  }
-  game.controls.removeAllListeners('command')
-  game.controls.on('command', function(command, setting) {
-    if (!connected) return
-    if (command === 'jump') return emitter.emit('jump')
-    game.fakeControls[command] = setting
-  })
-  
-  setInterval(function() {
-    if (!connected) return
-    if (!game.controls.enabled) return
-    var state = {
-      seq: Date.now(),
-      movement: game.fakeControls,
-      rotation: {
-        y: game.controls.yawObject.rotation.y,
-        x: game.controls.pitchObject.rotation.x
-      }
-    }
-    emitter.emit('state', state)
-    localInputs.push(state)
-    Object.keys(state.movement).map(function(key) {
-      game.controls[key] = state.movement[key]
-    })
-  }, 1000/22)
-  // 1000/22
-  var container = document.querySelector('#container')
-  
-  game.appendTo(container)
-  
-  container.addEventListener('click', function() {
-    game.requestPointerLock(container)
-  })
-  
-  // rotate camera left so it points at the characters
-  game.controls.yawObject.rotation.y = 1.5
+proto.height = function() {
+  return this.vec[1]
+}
 
-  var maxogden = skin(game.THREE, 'maxogden.png').createPlayerObject()
-  maxogden.position.set(0, 62, 20)
-  game.scene.add(maxogden)
+proto.depth = function() {
+  return this.vec[2]
+}
 
-  var substack = skin(game.THREE, 'substack.png').createPlayerObject()
-  substack.position.set(0, 62, -20)
-  game.scene.add(substack)
-  
-  window.viking = viking = skin(game.THREE, 'viking.png')
-  game.controls.pitchObject.rotation.x = -1.5;
-  
-  blockSelector.on('select', function(material) {
-    var idx = game.materials.indexOf(material)
-    if (idx === -1) {
-      for (var m = 0; m < game.materials.length; m++) {
-		console.log("game.materials[m]: " + JSON.stringify(game.materials[m]))
-        if (typeof game.materials[m] === 'object' && game.materials[m][0] === material) idx = m
-      }
-    }
-    if (idx > -1) currentMaterial = idx + 1
-  })
+proto.x0 = function() {
+  return this.base[0]
+}
 
-  var explode = debris(game, { power : 1.5, yield: 1 })
-  
-  game.on('mousedown', function (pos) {
-    if (erase) {
-      var voxVec = this.voxels.voxelVector(pos)
-      var cid = this.voxels.chunkAtPosition(pos).join('|')
-      emitter.emit('set', cid, voxVec, 0)
+proto.y0 = function() {
+  return this.base[1]
+}
+
+proto.z0 = function() {
+  return this.base[2]
+}
+
+proto.x1 = function() {
+  return this.max[0]
+}
+
+proto.y1 = function() {
+  return this.max[1]
+}
+
+proto.z1 = function() {
+  return this.max[2]
+}
+
+proto.translate = function(by) {
+  vec3.add(this.max, this.max, by)
+  vec3.add(this.base, this.base, by)
+  return this
+}
+
+proto.expand = function(aabb) {
+  var max = vec3.create()
+    , min = vec3.create()
+
+  vec3.max(max, aabb.max, this.max)
+  vec3.min(min, aabb.base, this.base)
+  vec3.sub(max, max, min)
+
+  return new AABB(min, max)
+}
+
+proto.intersects = function(aabb) {
+  if(aabb.base[0] > this.max[0]) return false
+  if(aabb.base[1] > this.max[1]) return false
+  if(aabb.base[2] > this.max[2]) return false
+  if(aabb.max[0] < this.base[0]) return false
+  if(aabb.max[1] < this.base[1]) return false
+  if(aabb.max[2] < this.base[2]) return false
+
+  return true
+}
+
+proto.union = function(aabb) {
+  if(!this.intersects(aabb)) return null
+
+  var base_x = Math.max(aabb.base[0], this.base[0])
+    , base_y = Math.max(aabb.base[1], this.base[1])
+    , base_z = Math.max(aabb.base[2], this.base[2])
+    , max_x = Math.min(aabb.max[0], this.max[0])
+    , max_y = Math.min(aabb.max[1], this.max[1])
+    , max_z = Math.min(aabb.max[2], this.max[2])
+
+  return new AABB([base_x, base_y, base_z], [max_x - base_x, max_y - base_y, max_z - base_z])
+}
+
+});
+
+require.define("/node_modules/voxel-region-change/node_modules/aabb-3d/node_modules/gl-matrix/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"dist/gl-matrix.js"}
+});
+
+require.define("/node_modules/voxel-region-change/node_modules/aabb-3d/node_modules/gl-matrix/dist/gl-matrix.js",function(require,module,exports,__dirname,__filename,process,global){/**
+ * @fileoverview gl-matrix - High performance matrix and vector operations
+ * @author Brandon Jones
+ * @author Colin MacKenzie IV
+ * @version 2.0.0
+ */
+
+/* Copyright (c) 2012, Brandon Jones, Colin MacKenzie IV. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation 
+    and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+
+(function() {
+  "use strict";
+
+  var shim = {};
+  if (typeof(exports) === 'undefined') {
+    if(typeof define == 'function' && typeof define.amd == 'object' && define.amd) {
+      shim.exports = {};
+      define(function() {
+        return shim.exports;
+      });
     } else {
-      var newBlock = game.checkBlock(pos)
-      if (!newBlock) return
-	  console.log("setting block at: " + newBlock.chunkIndex)
-      emitter.emit('set', newBlock.chunkIndex, newBlock.voxelVector, currentMaterial)
-    }
-  })
-  
-  // new AverageLatency(emitter, function(latency) {
-  //   game.latency = latency
-  // })
-    
-  //three seems to throw errors if you add stuff too soon
-  setTimeout(function() {
-    emitter.on('update', function(updates) {   
-  	  //console.log("updatePlayerPosition")   
-      Object.keys(updates.positions).map(function(player) {
-        var update = updates.positions[player]
-        if (player === playerID) return storeServerUpdate(update)
-        updatePlayerPosition(player, update)
-      })
-    })
-  }, 1000)
-
-  emitter.on('leave', function(id) {
-    // game.scene.remove(players[id].mesh) <- this doesnt work for some reason
-    delete players[id]
-  })
-  
-  return game
-}
-
-function lerpMe(position) {
-  var to = new game.THREE.Vector3()
-  to.copy(position)
-  var from = game.controls.yawObject.position
-  from.copy(from.lerpSelf(to, 0.1))  
-}
-
-function updatePlayerPosition(id, update) {
-  var pos = update.position
-  var player = players[id]
-  if (!player) {
-    var playerMesh = viking.createPlayerObject()
-    players[id] = playerMesh
-    playerMesh.children[0].position.y = 10
-    game.scene.add(playerMesh)
+      // gl-matrix lives in a browser, define its namespaces in global
+      shim.exports = window;
+    }    
   }
-  var playerMesh = players[id].children[0]
-  players[id].lastPositionTime = Date.now()
-  playerMesh.position.copy(pos)
-  playerMesh.position.y -= 23
-  playerMesh.rotation.y = update.rotation.y + (Math.PI / 2)
-}
-
-var erase = true
-window.addEventListener('keydown', function (ev) {
-  if (ev.keyCode === 'X'.charCodeAt(0)) {
-    erase = !erase
+  else {
+    // gl-matrix lives in commonjs, define its namespaces in exports
+    shim.exports = exports;
   }
-})
-function ctrlToggle (ev) { erase = !ev.ctrlKey }
-window.addEventListener('keyup', ctrlToggle)
-window.addEventListener('keydown', ctrlToggle)
 
-window.onerror = function (msg, url, line) {
-    console.log("Caught[via window.onerror]: '" + msg + "' from " + url + ":" + line);
-    return true; // same as preventDefault
+  (function(exports) {
+    /* Copyright (c) 2012, Brandon Jones, Colin MacKenzie IV. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation 
+    and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+/**
+ * @class 2 Dimensional Vector
+ * @name vec2
+ */
+
+var vec2 = {};
+
+if(!GLMAT_EPSILON) {
+    var GLMAT_EPSILON = 0.000001;
+}
+ 
+/**
+ * Creates a new, empty vec2
+ *
+ * @returns {vec2} a new 2D vector
+ */
+vec2.create = function() {
+    return new Float32Array(2);
 };
+
+/**
+ * Creates a new vec2 initialized with values from an existing vector
+ *
+ * @param {vec2} a vector to clone
+ * @returns {vec2} a new 2D vector
+ */
+vec2.clone = function(a) {
+    var out = new Float32Array(2);
+    out[0] = a[0];
+    out[1] = a[1];
+    return out;
+};
+
+/**
+ * Creates a new vec2 initialized with the given values
+ *
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @returns {vec2} a new 2D vector
+ */
+vec2.fromValues = function(x, y) {
+    var out = new Float32Array(2);
+    out[0] = x;
+    out[1] = y;
+    return out;
+};
+
+/**
+ * Copy the values from one vec2 to another
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the source vector
+ * @returns {vec2} out
+ */
+vec2.copy = function(out, a) {
+    out[0] = a[0];
+    out[1] = a[1];
+    return out;
+};
+
+/**
+ * Set the components of a vec2 to the given values
+ *
+ * @param {vec2} out the receiving vector
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @returns {vec2} out
+ */
+vec2.set = function(out, x, y) {
+    out[0] = x;
+    out[1] = y;
+    return out;
+};
+
+/**
+ * Adds two vec2's
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {vec2} out
+ */
+vec2.add = function(out, a, b) {
+    out[0] = a[0] + b[0];
+    out[1] = a[1] + b[1];
+    return out;
+};
+
+/**
+ * Subtracts two vec2's
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {vec2} out
+ */
+vec2.sub = vec2.subtract = function(out, a, b) {
+    out[0] = a[0] - b[0];
+    out[1] = a[1] - b[1];
+    return out;
+};
+
+/**
+ * Multiplies two vec2's
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {vec2} out
+ */
+vec2.mul = vec2.multiply = function(out, a, b) {
+    out[0] = a[0] * b[0];
+    out[1] = a[1] * b[1];
+    return out;
+};
+
+/**
+ * Divides two vec2's
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {vec2} out
+ */
+vec2.div = vec2.divide = function(out, a, b) {
+    out[0] = a[0] / b[0];
+    out[1] = a[1] / b[1];
+    return out;
+};
+
+/**
+ * Returns the minimum of two vec2's
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {vec2} out
+ */
+vec2.min = function(out, a, b) {
+    out[0] = Math.min(a[0], b[0]);
+    out[1] = Math.min(a[1], b[1]);
+    return out;
+};
+
+/**
+ * Returns the maximum of two vec2's
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {vec2} out
+ */
+vec2.max = function(out, a, b) {
+    out[0] = Math.max(a[0], b[0]);
+    out[1] = Math.max(a[1], b[1]);
+    return out;
+};
+
+/**
+ * Scales a vec2 by a scalar number
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the vector to scale
+ * @param {vec2} b amount to scale the vector by
+ * @returns {vec2} out
+ */
+vec2.scale = function(out, a, b) {
+    out[0] = a[0] * b;
+    out[1] = a[1] * b;
+    return out;
+};
+
+/**
+ * Calculates the euclidian distance between two vec2's
+ *
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {Number} distance between a and b
+ */
+vec2.dist = vec2.distance = function(a, b) {
+    var x = b[0] - a[0],
+        y = b[1] - a[1];
+    return Math.sqrt(x*x + y*y);
+};
+
+/**
+ * Calculates the squared euclidian distance between two vec2's
+ *
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {Number} squared distance between a and b
+ */
+vec2.sqrDist = vec2.squaredDistance = function(a, b) {
+    var x = b[0] - a[0],
+        y = b[1] - a[1];
+    return x*x + y*y;
+};
+
+/**
+ * Caclulates the length of a vec2
+ *
+ * @param {vec2} a vector to calculate length of
+ * @returns {Number} length of a
+ */
+vec2.len = vec2.length = function (a) {
+    var x = a[0],
+        y = a[1];
+    return Math.sqrt(x*x + y*y);
+};
+
+/**
+ * Caclulates the squared length of a vec2
+ *
+ * @param {vec2} a vector to calculate squared length of
+ * @returns {Number} squared length of a
+ */
+vec2.sqrLen = vec2.squaredLength = function (a) {
+    var x = a[0],
+        y = a[1];
+    return x*x + y*y;
+};
+
+/**
+ * Negates the components of a vec2
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a vector to negate
+ * @returns {vec2} out
+ */
+vec2.negate = function(out, a) {
+    out[0] = -a[0];
+    out[1] = -a[1];
+    return out;
+};
+
+/**
+ * Normalize a vec2
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a vector to normalize
+ * @returns {vec2} out
+ */
+vec2.normalize = function(out, a) {
+    var x = a[0],
+        y = a[1];
+    var len = x*x + y*y;
+    if (len > 0) {
+        //TODO: evaluate use of glm_invsqrt here?
+        len = 1 / Math.sqrt(len);
+        out[0] = a[0] * len;
+        out[1] = a[1] * len;
+    }
+    return out;
+};
+
+/**
+ * Caclulates the dot product of two vec2's
+ *
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {Number} dot product of a and b
+ */
+vec2.dot = function (a, b) {
+    return a[0] * b[0] + a[1] * b[1];
+};
+
+/**
+ * Computes the cross product of two vec2's
+ * Note that the cross product must by definition produce a 3D vector
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @returns {vec3} out
+ */
+vec2.cross = function(out, a, b) {
+    var z = a[0] * b[1] - a[1] * b[0];
+    out[0] = out[1] = 0;
+    out[2] = z;
+    return out;
+};
+
+/**
+ * Performs a linear interpolation between two vec2's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec2} a the first operand
+ * @param {vec2} b the second operand
+ * @param {Number} t interpolation amount between the two inputs
+ * @returns {vec2} out
+ */
+vec2.lerp = function (out, a, b, t) {
+    var ax = a[0],
+        ay = a[1];
+    out[0] = ax + t * (b[0] - ax);
+    out[1] = ay + t * (b[1] - ay);
+    return out;
+};
+
+/**
+ * Transforms the vec2 with a mat2
+ *
+ * @param {vec2} out the receiving vector
+ * @param {vec2} a the vector to transform
+ * @param {mat2} m matrix to transform with
+ * @returns {vec2} out
+ */
+vec2.transformMat2 = function(out, a, m) {
+    var x = a[0],
+        y = a[1];
+    out[0] = x * m[0] + y * m[1];
+    out[1] = x * m[2] + y * m[3];
+    return out;
+};
+
+/**
+ * Perform some operation over an array of vec2s.
+ *
+ * @param {Array} a the array of vectors to iterate over
+ * @param {Number} stride Number of elements between the start of each vec2. If 0 assumes tightly packed
+ * @param {Number} offset Number of elements to skip at the beginning of the array
+ * @param {Number} count Number of vec2s to iterate over. If 0 iterates over entire array
+ * @param {Function} fn Function to call for each vector in the array
+ * @param {Object} [arg] additional argument to pass to fn
+ * @returns {Array} a
+ */
+vec2.forEach = (function() {
+    var vec = new Float32Array(2);
+
+    return function(a, stride, offset, count, fn, arg) {
+        var i, l;
+        if(!stride) {
+            stride = 2;
+        }
+
+        if(!offset) {
+            offset = 0;
+        }
+        
+        if(count) {
+            l = Math.min((count * stride) + offset, a.length);
+        } else {
+            l = a.length;
+        }
+
+        for(i = offset; i < l; i += stride) {
+            vec[0] = a[i]; vec[1] = a[i+1];
+            fn(vec, vec, arg);
+            a[i] = vec[0]; a[i+1] = vec[1];
+        }
+        
+        return a;
+    };
+})();
+
+/**
+ * Returns a string representation of a vector
+ *
+ * @param {vec2} vec vector to represent as a string
+ * @returns {String} string representation of the vector
+ */
+vec2.str = function (a) {
+    return 'vec2(' + a[0] + ', ' + a[1] + ')';
+};
+
+if(typeof(exports) !== 'undefined') {
+    exports.vec2 = vec2;
+}
+;
+/* Copyright (c) 2012, Brandon Jones, Colin MacKenzie IV. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation 
+    and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+/**
+ * @class 3 Dimensional Vector
+ * @name vec3
+ */
+
+var vec3 = {};
+
+if(!GLMAT_EPSILON) {
+    var GLMAT_EPSILON = 0.000001;
+}
+ 
+/**
+ * Creates a new, empty vec3
+ *
+ * @returns {vec3} a new 3D vector
+ */
+vec3.create = function() {
+    return new Float32Array(3);
+};
+
+/**
+ * Creates a new vec3 initialized with values from an existing vector
+ *
+ * @param {vec3} a vector to clone
+ * @returns {vec3} a new 3D vector
+ */
+vec3.clone = function(a) {
+    var out = new Float32Array(3);
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    return out;
+};
+
+/**
+ * Creates a new vec3 initialized with the given values
+ *
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @param {Number} z Z component
+ * @returns {vec3} a new 3D vector
+ */
+vec3.fromValues = function(x, y, z) {
+    var out = new Float32Array(3);
+    out[0] = x;
+    out[1] = y;
+    out[2] = z;
+    return out;
+};
+
+/**
+ * Copy the values from one vec3 to another
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the source vector
+ * @returns {vec3} out
+ */
+vec3.copy = function(out, a) {
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    return out;
+};
+
+/**
+ * Set the components of a vec3 to the given values
+ *
+ * @param {vec3} out the receiving vector
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @param {Number} z Z component
+ * @returns {vec3} out
+ */
+vec3.set = function(out, x, y, z) {
+    out[0] = x;
+    out[1] = y;
+    out[2] = z;
+    return out;
+};
+
+/**
+ * Adds two vec3's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {vec3} out
+ */
+vec3.add = function(out, a, b) {
+    out[0] = a[0] + b[0];
+    out[1] = a[1] + b[1];
+    out[2] = a[2] + b[2];
+    return out;
+};
+
+/**
+ * Subtracts two vec3's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {vec3} out
+ */
+vec3.sub = vec3.subtract = function(out, a, b) {
+    out[0] = a[0] - b[0];
+    out[1] = a[1] - b[1];
+    out[2] = a[2] - b[2];
+    return out;
+};
+
+/**
+ * Multiplies two vec3's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {vec3} out
+ */
+vec3.mul = vec3.multiply = function(out, a, b) {
+    out[0] = a[0] * b[0];
+    out[1] = a[1] * b[1];
+    out[2] = a[2] * b[2];
+    return out;
+};
+
+/**
+ * Divides two vec3's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {vec3} out
+ */
+vec3.div = vec3.divide = function(out, a, b) {
+    out[0] = a[0] / b[0];
+    out[1] = a[1] / b[1];
+    out[2] = a[2] / b[2];
+    return out;
+};
+
+/**
+ * Returns the minimum of two vec3's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {vec3} out
+ */
+vec3.min = function(out, a, b) {
+    out[0] = Math.min(a[0], b[0]);
+    out[1] = Math.min(a[1], b[1]);
+    out[2] = Math.min(a[2], b[2]);
+    return out;
+};
+
+/**
+ * Returns the maximum of two vec3's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {vec3} out
+ */
+vec3.max = function(out, a, b) {
+    out[0] = Math.max(a[0], b[0]);
+    out[1] = Math.max(a[1], b[1]);
+    out[2] = Math.max(a[2], b[2]);
+    return out;
+};
+
+/**
+ * Scales a vec3 by a scalar number
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the vector to scale
+ * @param {vec3} b amount to scale the vector by
+ * @returns {vec3} out
+ */
+vec3.scale = function(out, a, b) {
+    out[0] = a[0] * b;
+    out[1] = a[1] * b;
+    out[2] = a[2] * b;
+    return out;
+};
+
+/**
+ * Calculates the euclidian distance between two vec3's
+ *
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {Number} distance between a and b
+ */
+vec3.dist = vec3.distance = function(a, b) {
+    var x = b[0] - a[0],
+        y = b[1] - a[1],
+        z = b[2] - a[2];
+    return Math.sqrt(x*x + y*y + z*z);
+};
+
+/**
+ * Calculates the squared euclidian distance between two vec3's
+ *
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {Number} squared distance between a and b
+ */
+vec3.sqrDist = vec3.squaredDistance = function(a, b) {
+    var x = b[0] - a[0],
+        y = b[1] - a[1],
+        z = b[2] - a[2];
+    return x*x + y*y + z*z;
+};
+
+/**
+ * Caclulates the length of a vec3
+ *
+ * @param {vec3} a vector to calculate length of
+ * @returns {Number} length of a
+ */
+vec3.len = vec3.length = function (a) {
+    var x = a[0],
+        y = a[1],
+        z = a[2];
+    return Math.sqrt(x*x + y*y + z*z);
+};
+
+/**
+ * Caclulates the squared length of a vec3
+ *
+ * @param {vec3} a vector to calculate squared length of
+ * @returns {Number} squared length of a
+ */
+vec3.sqrLen = vec3.squaredLength = function (a) {
+    var x = a[0],
+        y = a[1],
+        z = a[2];
+    return x*x + y*y + z*z;
+};
+
+/**
+ * Negates the components of a vec3
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a vector to negate
+ * @returns {vec3} out
+ */
+vec3.negate = function(out, a) {
+    out[0] = -a[0];
+    out[1] = -a[1];
+    out[2] = -a[2];
+    return out;
+};
+
+/**
+ * Normalize a vec3
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a vector to normalize
+ * @returns {vec3} out
+ */
+vec3.normalize = function(out, a) {
+    var x = a[0],
+        y = a[1],
+        z = a[2];
+    var len = x*x + y*y + z*z;
+    if (len > 0) {
+        //TODO: evaluate use of glm_invsqrt here?
+        len = 1 / Math.sqrt(len);
+        out[0] = a[0] * len;
+        out[1] = a[1] * len;
+        out[2] = a[2] * len;
+    }
+    return out;
+};
+
+/**
+ * Caclulates the dot product of two vec3's
+ *
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {Number} dot product of a and b
+ */
+vec3.dot = function (a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+};
+
+/**
+ * Computes the cross product of two vec3's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @returns {vec3} out
+ */
+vec3.cross = function(out, a, b) {
+    var ax = a[0], ay = a[1], az = a[2],
+        bx = b[0], by = b[1], bz = b[2];
+
+    out[0] = ay * bz - az * by;
+    out[1] = az * bx - ax * bz;
+    out[2] = ax * by - ay * bx;
+    return out;
+};
+
+/**
+ * Performs a linear interpolation between two vec3's
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the first operand
+ * @param {vec3} b the second operand
+ * @param {Number} t interpolation amount between the two inputs
+ * @returns {vec3} out
+ */
+vec3.lerp = function (out, a, b, t) {
+    var ax = a[0],
+        ay = a[1],
+        az = a[2];
+    out[0] = ax + t * (b[0] - ax);
+    out[1] = ay + t * (b[1] - ay);
+    out[2] = az + t * (b[2] - az);
+    return out;
+};
+
+/**
+ * Transforms the vec3 with a mat4.
+ * 4th vector component is implicitly '1'
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the vector to transform
+ * @param {mat4} m matrix to transform with
+ * @returns {vec3} out
+ */
+vec3.transformMat4 = function(out, a, m) {
+    var x = a[0], y = a[1], z = a[2];
+    out[0] = m[0] * x + m[4] * y + m[8] * z + m[12];
+    out[1] = m[1] * x + m[5] * y + m[9] * z + m[13];
+    out[2] = m[2] * x + m[6] * y + m[10] * z + m[14];
+    return out;
+};
+
+/**
+ * Transforms the vec3 with a quat
+ *
+ * @param {vec3} out the receiving vector
+ * @param {vec3} a the vector to transform
+ * @param {quat} q quaternion to transform with
+ * @returns {vec3} out
+ */
+vec3.transformQuat = function(out, a, q) {
+    var x = a[0], y = a[1], z = a[2],
+        qx = q[0], qy = q[1], qz = q[2], qw = q[3],
+
+        // calculate quat * vec
+        ix = qw * x + qy * z - qz * y,
+        iy = qw * y + qz * x - qx * z,
+        iz = qw * z + qx * y - qy * x,
+        iw = -qx * x - qy * y - qz * z;
+
+    // calculate result * inverse quat
+    out[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+    out[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+    out[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+    return out;
+};
+
+/**
+ * Perform some operation over an array of vec3s.
+ *
+ * @param {Array} a the array of vectors to iterate over
+ * @param {Number} stride Number of elements between the start of each vec3. If 0 assumes tightly packed
+ * @param {Number} offset Number of elements to skip at the beginning of the array
+ * @param {Number} count Number of vec3s to iterate over. If 0 iterates over entire array
+ * @param {Function} fn Function to call for each vector in the array
+ * @param {Object} [arg] additional argument to pass to fn
+ * @returns {Array} a
+ */
+vec3.forEach = (function() {
+    var vec = new Float32Array(3);
+
+    return function(a, stride, offset, count, fn, arg) {
+        var i, l;
+        if(!stride) {
+            stride = 3;
+        }
+
+        if(!offset) {
+            offset = 0;
+        }
+        
+        if(count) {
+            l = Math.min((count * stride) + offset, a.length);
+        } else {
+            l = a.length;
+        }
+
+        for(i = offset; i < l; i += stride) {
+            vec[0] = a[i]; vec[1] = a[i+1]; vec[2] = a[i+2];
+            fn(vec, vec, arg);
+            a[i] = vec[0]; a[i+1] = vec[1]; a[i+2] = vec[2];
+        }
+        
+        return a;
+    };
+})();
+
+/**
+ * Returns a string representation of a vector
+ *
+ * @param {vec3} vec vector to represent as a string
+ * @returns {String} string representation of the vector
+ */
+vec3.str = function (a) {
+    return 'vec3(' + a[0] + ', ' + a[1] + ', ' + a[2] + ')';
+};
+
+if(typeof(exports) !== 'undefined') {
+    exports.vec3 = vec3;
+}
+;
+/* Copyright (c) 2012, Brandon Jones, Colin MacKenzie IV. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation 
+    and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+/**
+ * @class 4 Dimensional Vector
+ * @name vec4
+ */
+
+var vec4 = {};
+
+if(!GLMAT_EPSILON) {
+    var GLMAT_EPSILON = 0.000001;
+}
+
+/**
+ * Creates a new, empty vec4
+ *
+ * @returns {vec4} a new 4D vector
+ */
+vec4.create = function() {
+    return new Float32Array(4);
+};
+
+/**
+ * Creates a new vec4 initialized with values from an existing vector
+ *
+ * @param {vec4} a vector to clone
+ * @returns {vec4} a new 4D vector
+ */
+vec4.clone = function(a) {
+    var out = new Float32Array(4);
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    return out;
+};
+
+/**
+ * Creates a new vec4 initialized with the given values
+ *
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @param {Number} z Z component
+ * @param {Number} w W component
+ * @returns {vec4} a new 4D vector
+ */
+vec4.fromValues = function(x, y, z, w) {
+    var out = new Float32Array(4);
+    out[0] = x;
+    out[1] = y;
+    out[2] = z;
+    out[3] = w;
+    return out;
+};
+
+/**
+ * Copy the values from one vec4 to another
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the source vector
+ * @returns {vec4} out
+ */
+vec4.copy = function(out, a) {
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    return out;
+};
+
+/**
+ * Set the components of a vec4 to the given values
+ *
+ * @param {vec4} out the receiving vector
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @param {Number} z Z component
+ * @param {Number} w W component
+ * @returns {vec4} out
+ */
+vec4.set = function(out, x, y, z, w) {
+    out[0] = x;
+    out[1] = y;
+    out[2] = z;
+    out[3] = w;
+    return out;
+};
+
+/**
+ * Adds two vec4's
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {vec4} out
+ */
+vec4.add = function(out, a, b) {
+    out[0] = a[0] + b[0];
+    out[1] = a[1] + b[1];
+    out[2] = a[2] + b[2];
+    out[3] = a[3] + b[3];
+    return out;
+};
+
+/**
+ * Subtracts two vec4's
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {vec4} out
+ */
+vec4.sub = vec4.subtract = function(out, a, b) {
+    out[0] = a[0] - b[0];
+    out[1] = a[1] - b[1];
+    out[2] = a[2] - b[2];
+    out[3] = a[3] - b[3];
+    return out;
+};
+
+/**
+ * Multiplies two vec4's
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {vec4} out
+ */
+vec4.mul = vec4.multiply = function(out, a, b) {
+    out[0] = a[0] * b[0];
+    out[1] = a[1] * b[1];
+    out[2] = a[2] * b[2];
+    out[3] = a[3] * b[3];
+    return out;
+};
+
+/**
+ * Divides two vec4's
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {vec4} out
+ */
+vec4.div = vec4.divide = function(out, a, b) {
+    out[0] = a[0] / b[0];
+    out[1] = a[1] / b[1];
+    out[2] = a[2] / b[2];
+    out[3] = a[3] / b[3];
+    return out;
+};
+
+/**
+ * Returns the minimum of two vec4's
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {vec4} out
+ */
+vec4.min = function(out, a, b) {
+    out[0] = Math.min(a[0], b[0]);
+    out[1] = Math.min(a[1], b[1]);
+    out[2] = Math.min(a[2], b[2]);
+    out[3] = Math.min(a[3], b[3]);
+    return out;
+};
+
+/**
+ * Returns the maximum of two vec4's
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {vec4} out
+ */
+vec4.max = function(out, a, b) {
+    out[0] = Math.max(a[0], b[0]);
+    out[1] = Math.max(a[1], b[1]);
+    out[2] = Math.max(a[2], b[2]);
+    out[3] = Math.max(a[3], b[3]);
+    return out;
+};
+
+/**
+ * Scales a vec4 by a scalar number
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the vector to scale
+ * @param {vec4} b amount to scale the vector by
+ * @returns {vec4} out
+ */
+vec4.scale = function(out, a, b) {
+    out[0] = a[0] * b;
+    out[1] = a[1] * b;
+    out[2] = a[2] * b;
+    out[3] = a[3] * b;
+    return out;
+};
+
+/**
+ * Calculates the euclidian distance between two vec4's
+ *
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {Number} distance between a and b
+ */
+vec4.dist = vec4.distance = function(a, b) {
+    var x = b[0] - a[0],
+        y = b[1] - a[1],
+        z = b[2] - a[2],
+        w = b[3] - a[3];
+    return Math.sqrt(x*x + y*y + z*z + w*w);
+};
+
+/**
+ * Calculates the squared euclidian distance between two vec4's
+ *
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {Number} squared distance between a and b
+ */
+vec4.sqrDist = vec4.squaredDistance = function(a, b) {
+    var x = b[0] - a[0],
+        y = b[1] - a[1],
+        z = b[2] - a[2],
+        w = b[3] - a[3];
+    return x*x + y*y + z*z + w*w;
+};
+
+/**
+ * Caclulates the length of a vec4
+ *
+ * @param {vec4} a vector to calculate length of
+ * @returns {Number} length of a
+ */
+vec4.len = vec4.length = function (a) {
+    var x = a[0],
+        y = a[1],
+        z = a[2],
+        w = a[3];
+    return Math.sqrt(x*x + y*y + z*z + w*w);
+};
+
+/**
+ * Caclulates the squared length of a vec4
+ *
+ * @param {vec4} a vector to calculate squared length of
+ * @returns {Number} squared length of a
+ */
+vec4.sqrLen = vec4.squaredLength = function (a) {
+    var x = a[0],
+        y = a[1],
+        z = a[2],
+        w = a[3];
+    return x*x + y*y + z*z + w*w;
+};
+
+/**
+ * Negates the components of a vec4
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a vector to negate
+ * @returns {vec4} out
+ */
+vec4.negate = function(out, a) {
+    out[0] = -a[0];
+    out[1] = -a[1];
+    out[2] = -a[2];
+    out[3] = -a[3];
+    return out;
+};
+
+/**
+ * Normalize a vec4
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a vector to normalize
+ * @returns {vec4} out
+ */
+vec4.normalize = function(out, a) {
+    var x = a[0],
+        y = a[1],
+        z = a[2],
+        w = a[3];
+    var len = x*x + y*y + z*z + w*w;
+    if (len > 0) {
+        len = 1 / Math.sqrt(len);
+        out[0] = a[0] * len;
+        out[1] = a[1] * len;
+        out[2] = a[2] * len;
+        out[3] = a[3] * len;
+    }
+    return out;
+};
+
+/**
+ * Caclulates the dot product of two vec4's
+ *
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @returns {Number} dot product of a and b
+ */
+vec4.dot = function (a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+};
+
+/**
+ * Performs a linear interpolation between two vec4's
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the first operand
+ * @param {vec4} b the second operand
+ * @param {Number} t interpolation amount between the two inputs
+ * @returns {vec4} out
+ */
+vec4.lerp = function (out, a, b, t) {
+    var ax = a[0],
+        ay = a[1],
+        az = a[2],
+        aw = a[3];
+    out[0] = ax + t * (b[0] - ax);
+    out[1] = ay + t * (b[1] - ay);
+    out[2] = az + t * (b[2] - az);
+    out[3] = aw + t * (b[3] - aw);
+    return out;
+};
+
+/**
+ * Transforms the vec4 with a mat4.
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the vector to transform
+ * @param {mat4} m matrix to transform with
+ * @returns {vec4} out
+ */
+vec4.transformMat4 = function(out, a, m) {
+    var x = a[0], y = a[1], z = a[2], w = a[3];
+    out[0] = m[0] * x + m[4] * y + m[8] * z + m[12] * w;
+    out[1] = m[1] * x + m[5] * y + m[9] * z + m[13] * w;
+    out[2] = m[2] * x + m[6] * y + m[10] * z + m[14] * w;
+    out[3] = m[3] * x + m[7] * y + m[11] * z + m[15] * w;
+    return out;
+};
+
+/**
+ * Transforms the vec4 with a quat
+ *
+ * @param {vec4} out the receiving vector
+ * @param {vec4} a the vector to transform
+ * @param {quat} q quaternion to transform with
+ * @returns {vec4} out
+ */
+vec4.transformQuat = function(out, a, q) {
+    var x = a[0], y = a[1], z = a[2],
+        qx = q[0], qy = q[1], qz = q[2], qw = q[3],
+
+        // calculate quat * vec
+        ix = qw * x + qy * z - qz * y,
+        iy = qw * y + qz * x - qx * z,
+        iz = qw * z + qx * y - qy * x,
+        iw = -qx * x - qy * y - qz * z;
+
+    // calculate result * inverse quat
+    out[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+    out[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+    out[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+    return out;
+};
+
+/**
+ * Perform some operation over an array of vec4s.
+ *
+ * @param {Array} a the array of vectors to iterate over
+ * @param {Number} stride Number of elements between the start of each vec4. If 0 assumes tightly packed
+ * @param {Number} offset Number of elements to skip at the beginning of the array
+ * @param {Number} count Number of vec2s to iterate over. If 0 iterates over entire array
+ * @param {Function} fn Function to call for each vector in the array
+ * @param {Object} [arg] additional argument to pass to fn
+ * @returns {Array} a
+ */
+vec4.forEach = (function() {
+    var vec = new Float32Array(4);
+
+    return function(a, stride, offset, count, fn, arg) {
+        var i, l;
+        if(!stride) {
+            stride = 4;
+        }
+
+        if(!offset) {
+            offset = 0;
+        }
+        
+        if(count) {
+            l = Math.min((count * stride) + offset, a.length);
+        } else {
+            l = a.length;
+        }
+
+        for(i = offset; i < l; i += stride) {
+            vec[0] = a[i]; vec[1] = a[i+1]; vec[2] = a[i+2]; vec[3] = a[i+3];
+            fn(vec, vec, arg);
+            a[i] = vec[0]; a[i+1] = vec[1]; a[i+2] = vec[2]; a[i+3] = vec[3];
+        }
+        
+        return a;
+    };
+})();
+
+/**
+ * Returns a string representation of a vector
+ *
+ * @param {vec4} vec vector to represent as a string
+ * @returns {String} string representation of the vector
+ */
+vec4.str = function (a) {
+    return 'vec4(' + a[0] + ', ' + a[1] + ', ' + a[2] + ', ' + a[3] + ')';
+};
+
+if(typeof(exports) !== 'undefined') {
+    exports.vec4 = vec4;
+}
+;
+/* Copyright (c) 2012, Brandon Jones, Colin MacKenzie IV. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation 
+    and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+/**
+ * @class 2x2 Matrix
+ * @name mat2
+ */
+
+var mat2 = {};
+
+var mat2Identity = new Float32Array([
+    1, 0,
+    0, 1
+]);
+
+if(!GLMAT_EPSILON) {
+    var GLMAT_EPSILON = 0.000001;
+}
+
+/**
+ * Creates a new identity mat2
+ *
+ * @returns {mat2} a new 2x2 matrix
+ */
+mat2.create = function() {
+    return new Float32Array(mat2Identity);
+};
+
+/**
+ * Creates a new mat2 initialized with values from an existing matrix
+ *
+ * @param {mat2} a matrix to clone
+ * @returns {mat2} a new 2x2 matrix
+ */
+mat2.clone = function(a) {
+    var out = new Float32Array(4);
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    return out;
+};
+
+/**
+ * Copy the values from one mat2 to another
+ *
+ * @param {mat2} out the receiving matrix
+ * @param {mat2} a the source matrix
+ * @returns {mat2} out
+ */
+mat2.copy = function(out, a) {
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    return out;
+};
+
+/**
+ * Set a mat2 to the identity matrix
+ *
+ * @param {mat2} out the receiving matrix
+ * @returns {mat2} out
+ */
+mat2.identity = function(out) {
+    out[0] = 1;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 1;
+    return out;
+};
+
+/**
+ * Transpose the values of a mat2
+ *
+ * @param {mat2} out the receiving matrix
+ * @param {mat2} a the source matrix
+ * @returns {mat2} out
+ */
+mat2.transpose = function(out, a) {
+    // If we are transposing ourselves we can skip a few steps but have to cache some values
+    if (out === a) {
+        var a1 = a[1];
+        out[1] = a[2];
+        out[2] = a1;
+    } else {
+        out[0] = a[0];
+        out[1] = a[2];
+        out[2] = a[1];
+        out[3] = a[3];
+    }
+    
+    return out;
+};
+
+/**
+ * Inverts a mat2
+ *
+ * @param {mat2} out the receiving matrix
+ * @param {mat2} a the source matrix
+ * @returns {mat2} out
+ */
+mat2.invert = function(out, a) {
+    var a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3],
+
+        // Calculate the determinant
+        det = a0 * a3 - a2 * a1;
+
+    if (!det) {
+        return null;
+    }
+    det = 1.0 / det;
+    
+    out[0] =  a3 * det;
+    out[1] = -a1 * det;
+    out[2] = -a2 * det;
+    out[3] =  a0 * det;
+
+    return out;
+};
+
+/**
+ * Caclulates the adjugate of a mat2
+ *
+ * @param {mat2} out the receiving matrix
+ * @param {mat2} a the source matrix
+ * @returns {mat2} out
+ */
+mat2.adjoint = function(out, a) {
+    // Caching this value is nessecary if out == a
+    var a0 = a[0];
+    out[0] =  a[3];
+    out[1] = -a[1];
+    out[2] = -a[2];
+    out[3] =  a0;
+
+    return out;
+};
+
+/**
+ * Calculates the determinant of a mat2
+ *
+ * @param {mat2} a the source matrix
+ * @returns {Number} determinant of a
+ */
+mat2.determinant = function (a) {
+    return a[0] * a[3] - a[2] * a[1];
+};
+
+/**
+ * Multiplies two mat2's
+ *
+ * @param {mat2} out the receiving matrix
+ * @param {mat2} a the first operand
+ * @param {mat2} b the second operand
+ * @returns {mat2} out
+ */
+mat2.mul = mat2.multiply = function (out, a, b) {
+    var a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3];
+    var b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+    out[0] = a0 * b0 + a1 * b2;
+    out[1] = a0 * b1 + a1 * b3;
+    out[2] = a2 * b0 + a3 * b2;
+    out[3] = a2 * b1 + a3 * b3;
+    return out;
+};
+
+/**
+ * Rotates a mat2 by the given angle
+ *
+ * @param {mat2} out the receiving matrix
+ * @param {mat2} a the matrix to rotate
+ * @param {mat2} rad the angle to rotate the matrix by
+ * @returns {mat2} out
+ */
+mat2.rotate = function (out, a, rad) {
+    var a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3],
+        s = Math.sin(rad),
+        c = Math.cos(rad);
+    out[0] = a0 *  c + a1 * s;
+    out[1] = a0 * -s + a1 * c;
+    out[2] = a2 *  c + a3 * s;
+    out[3] = a2 * -s + a3 * c;
+    return out;
+};
+
+/**
+ * Scales the mat2 by the dimensions in the given vec2
+ *
+ * @param {mat2} out the receiving matrix
+ * @param {mat2} a the matrix to rotate
+ * @param {mat2} v the vec2 to scale the matrix by
+ * @returns {mat2} out
+ **/
+mat2.scale = function(out, a, v) {
+    var a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3],
+        v0 = v[0], v1 = v[1];
+    out[0] = a0 * v0;
+    out[1] = a1 * v1;
+    out[2] = a2 * v0;
+    out[3] = a3 * v1;
+    return out;
+};
+
+/**
+ * Returns a string representation of a mat2
+ *
+ * @param {mat2} mat matrix to represent as a string
+ * @returns {String} string representation of the matrix
+ */
+mat2.str = function (a) {
+    return 'mat2(' + a[0] + ', ' + a[1] + ', ' + a[2] + ', ' + a[3] + ')';
+};
+
+if(typeof(exports) !== 'undefined') {
+    exports.mat2 = mat2;
+}
+;
+/* Copyright (c) 2012, Brandon Jones, Colin MacKenzie IV. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation 
+    and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+/**
+ * @class 3x3 Matrix
+ * @name mat3
+ */
+
+var mat3 = {};
+
+var mat3Identity = new Float32Array([
+    1, 0, 0,
+    0, 1, 0,
+    0, 0, 1
+]);
+
+if(!GLMAT_EPSILON) {
+    var GLMAT_EPSILON = 0.000001;
+}
+
+/**
+ * Creates a new identity mat3
+ *
+ * @returns {mat3} a new 3x3 matrix
+ */
+mat3.create = function() {
+    return new Float32Array(mat3Identity);
+};
+
+/**
+ * Creates a new mat3 initialized with values from an existing matrix
+ *
+ * @param {mat3} a matrix to clone
+ * @returns {mat3} a new 3x3 matrix
+ */
+mat3.clone = function(a) {
+    var out = new Float32Array(9);
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    out[4] = a[4];
+    out[5] = a[5];
+    out[6] = a[6];
+    out[7] = a[7];
+    out[8] = a[8];
+    return out;
+};
+
+/**
+ * Copy the values from one mat3 to another
+ *
+ * @param {mat3} out the receiving matrix
+ * @param {mat3} a the source matrix
+ * @returns {mat3} out
+ */
+mat3.copy = function(out, a) {
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    out[4] = a[4];
+    out[5] = a[5];
+    out[6] = a[6];
+    out[7] = a[7];
+    out[8] = a[8];
+    return out;
+};
+
+/**
+ * Set a mat3 to the identity matrix
+ *
+ * @param {mat3} out the receiving matrix
+ * @returns {mat3} out
+ */
+mat3.identity = function(out) {
+    out[0] = 1;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 1;
+    out[5] = 0;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 1;
+    return out;
+};
+
+/**
+ * Transpose the values of a mat3
+ *
+ * @param {mat3} out the receiving matrix
+ * @param {mat3} a the source matrix
+ * @returns {mat3} out
+ */
+mat3.transpose = function(out, a) {
+    // If we are transposing ourselves we can skip a few steps but have to cache some values
+    if (out === a) {
+        var a01 = a[1], a02 = a[2], a12 = a[5];
+        out[1] = a[3];
+        out[2] = a[6];
+        out[3] = a01;
+        out[5] = a[7];
+        out[6] = a02;
+        out[7] = a12;
+    } else {
+        out[0] = a[0];
+        out[1] = a[3];
+        out[2] = a[6];
+        out[3] = a[1];
+        out[4] = a[4];
+        out[5] = a[7];
+        out[6] = a[2];
+        out[7] = a[5];
+        out[8] = a[8];
+    }
+    
+    return out;
+};
+
+/**
+ * Inverts a mat3
+ *
+ * @param {mat3} out the receiving matrix
+ * @param {mat3} a the source matrix
+ * @returns {mat3} out
+ */
+mat3.invert = function(out, a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2],
+        a10 = a[3], a11 = a[4], a12 = a[5],
+        a20 = a[6], a21 = a[7], a22 = a[8],
+
+        b01 = a22 * a11 - a12 * a21,
+        b11 = -a22 * a10 + a12 * a20,
+        b21 = a21 * a10 - a11 * a20,
+
+        // Calculate the determinant
+        det = a00 * b01 + a01 * b11 + a02 * b21;
+
+    if (!det) { 
+        return null; 
+    }
+    det = 1.0 / det;
+
+    out[0] = b01 * det;
+    out[1] = (-a22 * a01 + a02 * a21) * det;
+    out[2] = (a12 * a01 - a02 * a11) * det;
+    out[3] = b11 * det;
+    out[4] = (a22 * a00 - a02 * a20) * det;
+    out[5] = (-a12 * a00 + a02 * a10) * det;
+    out[6] = b21 * det;
+    out[7] = (-a21 * a00 + a01 * a20) * det;
+    out[8] = (a11 * a00 - a01 * a10) * det;
+    return out;
+};
+
+/**
+ * Caclulates the adjugate of a mat3
+ *
+ * @param {mat3} out the receiving matrix
+ * @param {mat3} a the source matrix
+ * @returns {mat3} out
+ */
+mat3.adjoint = function(out, a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2],
+        a10 = a[3], a11 = a[4], a12 = a[5],
+        a20 = a[6], a21 = a[7], a22 = a[8];
+
+    out[0] = (a11 * a22 - a12 * a21);
+    out[1] = (a02 * a21 - a01 * a22);
+    out[2] = (a01 * a12 - a02 * a11);
+    out[3] = (a12 * a20 - a10 * a22);
+    out[4] = (a00 * a22 - a02 * a20);
+    out[5] = (a02 * a10 - a00 * a12);
+    out[6] = (a10 * a21 - a11 * a20);
+    out[7] = (a01 * a20 - a00 * a21);
+    out[8] = (a00 * a11 - a01 * a10);
+    return out;
+};
+
+/**
+ * Calculates the determinant of a mat3
+ *
+ * @param {mat3} a the source matrix
+ * @returns {Number} determinant of a
+ */
+mat3.determinant = function (a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2],
+        a10 = a[3], a11 = a[4], a12 = a[5],
+        a20 = a[6], a21 = a[7], a22 = a[8];
+
+    return a00 * (a22 * a11 - a12 * a21) + a01 * (-a22 * a10 + a12 * a20) + a02 * (a21 * a10 - a11 * a20);
+};
+
+/**
+ * Multiplies two mat3's
+ *
+ * @param {mat3} out the receiving matrix
+ * @param {mat3} a the first operand
+ * @param {mat3} b the second operand
+ * @returns {mat3} out
+ */
+mat3.mul = mat3.multiply = function (out, a, b) {
+    var a00 = a[0], a01 = a[1], a02 = a[2],
+        a10 = a[3], a11 = a[4], a12 = a[5],
+        a20 = a[6], a21 = a[7], a22 = a[8],
+
+        b00 = b[0], b01 = b[1], b02 = b[2],
+        b10 = b[3], b11 = b[4], b12 = b[5],
+        b20 = b[6], b21 = b[7], b22 = b[8];
+
+    out[0] = b00 * a00 + b01 * a10 + b02 * a20;
+    out[1] = b00 * a01 + b01 * a11 + b02 * a21;
+    out[2] = b00 * a02 + b01 * a12 + b02 * a22;
+
+    out[3] = b10 * a00 + b11 * a10 + b12 * a20;
+    out[4] = b10 * a01 + b11 * a11 + b12 * a21;
+    out[5] = b10 * a02 + b11 * a12 + b12 * a22;
+
+    out[6] = b20 * a00 + b21 * a10 + b22 * a20;
+    out[7] = b20 * a01 + b21 * a11 + b22 * a21;
+    out[8] = b20 * a02 + b21 * a12 + b22 * a22;
+    return out;
+};
+
+/**
+ * Returns a string representation of a mat3
+ *
+ * @param {mat3} mat matrix to represent as a string
+ * @returns {String} string representation of the matrix
+ */
+mat3.str = function (a) {
+    return 'mat3(' + a[0] + ', ' + a[1] + ', ' + a[2] + ', ' + 
+                    a[3] + ', ' + a[4] + ', ' + a[5] + ', ' + 
+                    a[6] + ', ' + a[7] + ', ' + a[8] + ')';
+};
+
+if(typeof(exports) !== 'undefined') {
+    exports.mat3 = mat3;
+}
+;
+/* Copyright (c) 2012, Brandon Jones, Colin MacKenzie IV. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation 
+    and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+/**
+ * @class 4x4 Matrix
+ * @name mat4
+ */
+
+var mat4 = {};
+
+var mat4Identity = new Float32Array([
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    0, 0, 0, 1
+]);
+
+if(!GLMAT_EPSILON) {
+    var GLMAT_EPSILON = 0.000001;
+}
+
+/**
+ * Creates a new identity mat4
+ *
+ * @returns {mat4} a new 4x4 matrix
+ */
+mat4.create = function() {
+    return new Float32Array(mat4Identity);
+};
+
+/**
+ * Creates a new mat4 initialized with values from an existing matrix
+ *
+ * @param {mat4} a matrix to clone
+ * @returns {mat4} a new 4x4 matrix
+ */
+mat4.clone = function(a) {
+    var out = new Float32Array(16);
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    out[4] = a[4];
+    out[5] = a[5];
+    out[6] = a[6];
+    out[7] = a[7];
+    out[8] = a[8];
+    out[9] = a[9];
+    out[10] = a[10];
+    out[11] = a[11];
+    out[12] = a[12];
+    out[13] = a[13];
+    out[14] = a[14];
+    out[15] = a[15];
+    return out;
+};
+
+/**
+ * Copy the values from one mat4 to another
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the source matrix
+ * @returns {mat4} out
+ */
+mat4.copy = function(out, a) {
+    out[0] = a[0];
+    out[1] = a[1];
+    out[2] = a[2];
+    out[3] = a[3];
+    out[4] = a[4];
+    out[5] = a[5];
+    out[6] = a[6];
+    out[7] = a[7];
+    out[8] = a[8];
+    out[9] = a[9];
+    out[10] = a[10];
+    out[11] = a[11];
+    out[12] = a[12];
+    out[13] = a[13];
+    out[14] = a[14];
+    out[15] = a[15];
+    return out;
+};
+
+/**
+ * Set a mat4 to the identity matrix
+ *
+ * @param {mat4} out the receiving matrix
+ * @returns {mat4} out
+ */
+mat4.identity = function(out) {
+    out[0] = 1;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = 1;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = 1;
+    out[11] = 0;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = 0;
+    out[15] = 1;
+    return out;
+};
+
+/**
+ * Transpose the values of a mat4
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the source matrix
+ * @returns {mat4} out
+ */
+mat4.transpose = function(out, a) {
+    // If we are transposing ourselves we can skip a few steps but have to cache some values
+    if (out === a) {
+        var a01 = a[1], a02 = a[2], a03 = a[3],
+            a12 = a[6], a13 = a[7],
+            a23 = a[11];
+
+        out[1] = a[4];
+        out[2] = a[8];
+        out[3] = a[12];
+        out[4] = a01;
+        out[6] = a[9];
+        out[7] = a[13];
+        out[8] = a02;
+        out[9] = a12;
+        out[11] = a[14];
+        out[12] = a03;
+        out[13] = a13;
+        out[14] = a23;
+    } else {
+        out[0] = a[0];
+        out[1] = a[4];
+        out[2] = a[8];
+        out[3] = a[12];
+        out[4] = a[1];
+        out[5] = a[5];
+        out[6] = a[9];
+        out[7] = a[13];
+        out[8] = a[2];
+        out[9] = a[6];
+        out[10] = a[10];
+        out[11] = a[14];
+        out[12] = a[3];
+        out[13] = a[7];
+        out[14] = a[11];
+        out[15] = a[15];
+    }
+    
+    return out;
+};
+
+/**
+ * Inverts a mat4
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the source matrix
+ * @returns {mat4} out
+ */
+mat4.invert = function(out, a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
+        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
+        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
+        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15],
+
+        b00 = a00 * a11 - a01 * a10,
+        b01 = a00 * a12 - a02 * a10,
+        b02 = a00 * a13 - a03 * a10,
+        b03 = a01 * a12 - a02 * a11,
+        b04 = a01 * a13 - a03 * a11,
+        b05 = a02 * a13 - a03 * a12,
+        b06 = a20 * a31 - a21 * a30,
+        b07 = a20 * a32 - a22 * a30,
+        b08 = a20 * a33 - a23 * a30,
+        b09 = a21 * a32 - a22 * a31,
+        b10 = a21 * a33 - a23 * a31,
+        b11 = a22 * a33 - a23 * a32,
+
+        // Calculate the determinant
+        det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+
+    if (!det) { 
+        return null; 
+    }
+    det = 1.0 / det;
+
+    out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
+    out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+    out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
+    out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+    out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det;
+    out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+    out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det;
+    out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+    out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det;
+    out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+    out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det;
+    out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+    out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det;
+    out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+    out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
+    out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+
+    return out;
+};
+
+/**
+ * Caclulates the adjugate of a mat4
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the source matrix
+ * @returns {mat4} out
+ */
+mat4.adjoint = function(out, a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
+        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
+        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
+        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+    out[0]  =  (a11 * (a22 * a33 - a23 * a32) - a21 * (a12 * a33 - a13 * a32) + a31 * (a12 * a23 - a13 * a22));
+    out[1]  = -(a01 * (a22 * a33 - a23 * a32) - a21 * (a02 * a33 - a03 * a32) + a31 * (a02 * a23 - a03 * a22));
+    out[2]  =  (a01 * (a12 * a33 - a13 * a32) - a11 * (a02 * a33 - a03 * a32) + a31 * (a02 * a13 - a03 * a12));
+    out[3]  = -(a01 * (a12 * a23 - a13 * a22) - a11 * (a02 * a23 - a03 * a22) + a21 * (a02 * a13 - a03 * a12));
+    out[4]  = -(a10 * (a22 * a33 - a23 * a32) - a20 * (a12 * a33 - a13 * a32) + a30 * (a12 * a23 - a13 * a22));
+    out[5]  =  (a00 * (a22 * a33 - a23 * a32) - a20 * (a02 * a33 - a03 * a32) + a30 * (a02 * a23 - a03 * a22));
+    out[6]  = -(a00 * (a12 * a33 - a13 * a32) - a10 * (a02 * a33 - a03 * a32) + a30 * (a02 * a13 - a03 * a12));
+    out[7]  =  (a00 * (a12 * a23 - a13 * a22) - a10 * (a02 * a23 - a03 * a22) + a20 * (a02 * a13 - a03 * a12));
+    out[8]  =  (a10 * (a21 * a33 - a23 * a31) - a20 * (a11 * a33 - a13 * a31) + a30 * (a11 * a23 - a13 * a21));
+    out[9]  = -(a00 * (a21 * a33 - a23 * a31) - a20 * (a01 * a33 - a03 * a31) + a30 * (a01 * a23 - a03 * a21));
+    out[10] =  (a00 * (a11 * a33 - a13 * a31) - a10 * (a01 * a33 - a03 * a31) + a30 * (a01 * a13 - a03 * a11));
+    out[11] = -(a00 * (a11 * a23 - a13 * a21) - a10 * (a01 * a23 - a03 * a21) + a20 * (a01 * a13 - a03 * a11));
+    out[12] = -(a10 * (a21 * a32 - a22 * a31) - a20 * (a11 * a32 - a12 * a31) + a30 * (a11 * a22 - a12 * a21));
+    out[13] =  (a00 * (a21 * a32 - a22 * a31) - a20 * (a01 * a32 - a02 * a31) + a30 * (a01 * a22 - a02 * a21));
+    out[14] = -(a00 * (a11 * a32 - a12 * a31) - a10 * (a01 * a32 - a02 * a31) + a30 * (a01 * a12 - a02 * a11));
+    out[15] =  (a00 * (a11 * a22 - a12 * a21) - a10 * (a01 * a22 - a02 * a21) + a20 * (a01 * a12 - a02 * a11));
+    return out;
+};
+
+/**
+ * Calculates the determinant of a mat4
+ *
+ * @param {mat4} a the source matrix
+ * @returns {Number} determinant of a
+ */
+mat4.determinant = function (a) {
+    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
+        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
+        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
+        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15],
+
+        b00 = a00 * a11 - a01 * a10,
+        b01 = a00 * a12 - a02 * a10,
+        b02 = a00 * a13 - a03 * a10,
+        b03 = a01 * a12 - a02 * a11,
+        b04 = a01 * a13 - a03 * a11,
+        b05 = a02 * a13 - a03 * a12,
+        b06 = a20 * a31 - a21 * a30,
+        b07 = a20 * a32 - a22 * a30,
+        b08 = a20 * a33 - a23 * a30,
+        b09 = a21 * a32 - a22 * a31,
+        b10 = a21 * a33 - a23 * a31,
+        b11 = a22 * a33 - a23 * a32;
+
+    // Calculate the determinant
+    return b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+};
+
+/**
+ * Multiplies two mat4's
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the first operand
+ * @param {mat4} b the second operand
+ * @returns {mat4} out
+ */
+mat4.mul = mat4.multiply = function (out, a, b) {
+    var a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3],
+        a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
+        a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11],
+        a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+
+    // Cache only the current line of the second matrix
+    var b0  = b[0], b1 = b[1], b2 = b[2], b3 = b[3];  
+    out[0] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+    out[1] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+    out[2] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+    out[3] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+
+    b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+    out[4] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+    out[5] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+    out[6] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+    out[7] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+
+    b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+    out[8] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+    out[9] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+    out[10] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+    out[11] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+
+    b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+    out[12] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+    out[13] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+    out[14] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+    out[15] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+    return out;
+};
+
+/**
+ * Translate a mat4 by the given vector
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to translate
+ * @param {vec3} v vector to translate by
+ * @returns {mat4} out
+ */
+mat4.translate = function (out, a, v) {
+    var x = v[0], y = v[1], z = v[2],
+        a00, a01, a02, a03,
+        a10, a11, a12, a13,
+        a20, a21, a22, a23;
+
+    if (a === out) {
+        out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+        out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+        out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+        out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+    } else {
+        a00 = a[0]; a01 = a[1]; a02 = a[2]; a03 = a[3];
+        a10 = a[4]; a11 = a[5]; a12 = a[6]; a13 = a[7];
+        a20 = a[8]; a21 = a[9]; a22 = a[10]; a23 = a[11];
+
+        out[0] = a00; out[1] = a01; out[2] = a02; out[3] = a03;
+        out[4] = a10; out[5] = a11; out[6] = a12; out[7] = a13;
+        out[8] = a20; out[9] = a21; out[10] = a22; out[11] = a23;
+
+        out[12] = a00 * x + a10 * y + a20 * z + a[12];
+        out[13] = a01 * x + a11 * y + a21 * z + a[13];
+        out[14] = a02 * x + a12 * y + a22 * z + a[14];
+        out[15] = a03 * x + a13 * y + a23 * z + a[15];
+    }
+
+    return out;
+};
+
+/**
+ * Scales the mat4 by the dimensions in the given vec3
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to scale
+ * @param {vec3} v the vec3 to scale the matrix by
+ * @returns {mat4} out
+ **/
+mat4.scale = function(out, a, v) {
+    var x = v[0], y = v[1], z = v[2];
+
+    out[0] = a[0] * x;
+    out[1] = a[1] * x;
+    out[2] = a[2] * x;
+    out[3] = a[3] * x;
+    out[4] = a[4] * y;
+    out[5] = a[5] * y;
+    out[6] = a[6] * y;
+    out[7] = a[7] * y;
+    out[8] = a[8] * z;
+    out[9] = a[9] * z;
+    out[10] = a[10] * z;
+    out[11] = a[11] * z;
+    out[12] = a[12];
+    out[13] = a[13];
+    out[14] = a[14];
+    out[15] = a[15];
+    return out;
+};
+
+/**
+ * Rotates a mat4 by the given angle
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to rotate
+ * @param {Number} rad the angle to rotate the matrix by
+ * @param {vec3} axis the axis to rotate around
+ * @returns {mat4} out
+ */
+mat4.rotate = function (out, a, rad, axis) {
+    var x = axis[0], y = axis[1], z = axis[2],
+        len = Math.sqrt(x * x + y * y + z * z),
+        s, c, t,
+        a00, a01, a02, a03,
+        a10, a11, a12, a13,
+        a20, a21, a22, a23,
+        b00, b01, b02,
+        b10, b11, b12,
+        b20, b21, b22;
+
+    if (Math.abs(len) < GLMAT_EPSILON) { return null; }
+    
+    len = 1 / len;
+    x *= len;
+    y *= len;
+    z *= len;
+
+    s = Math.sin(rad);
+    c = Math.cos(rad);
+    t = 1 - c;
+
+    a00 = a[0]; a01 = a[1]; a02 = a[2]; a03 = a[3];
+    a10 = a[4]; a11 = a[5]; a12 = a[6]; a13 = a[7];
+    a20 = a[8]; a21 = a[9]; a22 = a[10]; a23 = a[11];
+
+    // Construct the elements of the rotation matrix
+    b00 = x * x * t + c; b01 = y * x * t + z * s; b02 = z * x * t - y * s;
+    b10 = x * y * t - z * s; b11 = y * y * t + c; b12 = z * y * t + x * s;
+    b20 = x * z * t + y * s; b21 = y * z * t - x * s; b22 = z * z * t + c;
+
+    // Perform rotation-specific matrix multiplication
+    out[0] = a00 * b00 + a10 * b01 + a20 * b02;
+    out[1] = a01 * b00 + a11 * b01 + a21 * b02;
+    out[2] = a02 * b00 + a12 * b01 + a22 * b02;
+    out[3] = a03 * b00 + a13 * b01 + a23 * b02;
+    out[4] = a00 * b10 + a10 * b11 + a20 * b12;
+    out[5] = a01 * b10 + a11 * b11 + a21 * b12;
+    out[6] = a02 * b10 + a12 * b11 + a22 * b12;
+    out[7] = a03 * b10 + a13 * b11 + a23 * b12;
+    out[8] = a00 * b20 + a10 * b21 + a20 * b22;
+    out[9] = a01 * b20 + a11 * b21 + a21 * b22;
+    out[10] = a02 * b20 + a12 * b21 + a22 * b22;
+    out[11] = a03 * b20 + a13 * b21 + a23 * b22;
+
+    if (a !== out) { // If the source and destination differ, copy the unchanged last row
+        out[12] = a[12];
+        out[13] = a[13];
+        out[14] = a[14];
+        out[15] = a[15];
+    }
+    return out;
+};
+
+/**
+ * Rotates a matrix by the given angle around the X axis
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to rotate
+ * @param {Number} rad the angle to rotate the matrix by
+ * @returns {mat4} out
+ */
+mat4.rotateX = function (out, a, rad) {
+    var s = Math.sin(rad),
+        c = Math.cos(rad),
+        a10 = a[4],
+        a11 = a[5],
+        a12 = a[6],
+        a13 = a[7],
+        a20 = a[8],
+        a21 = a[9],
+        a22 = a[10],
+        a23 = a[11];
+
+    if (a !== out) { // If the source and destination differ, copy the unchanged rows
+        out[0]  = a[0];
+        out[1]  = a[1];
+        out[2]  = a[2];
+        out[3]  = a[3];
+        out[12] = a[12];
+        out[13] = a[13];
+        out[14] = a[14];
+        out[15] = a[15];
+    }
+
+    // Perform axis-specific matrix multiplication
+    out[4] = a10 * c + a20 * s;
+    out[5] = a11 * c + a21 * s;
+    out[6] = a12 * c + a22 * s;
+    out[7] = a13 * c + a23 * s;
+    out[8] = a20 * c - a10 * s;
+    out[9] = a21 * c - a11 * s;
+    out[10] = a22 * c - a12 * s;
+    out[11] = a23 * c - a13 * s;
+    return out;
+};
+
+/**
+ * Rotates a matrix by the given angle around the Y axis
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to rotate
+ * @param {Number} rad the angle to rotate the matrix by
+ * @returns {mat4} out
+ */
+mat4.rotateY = function (out, a, rad) {
+    var s = Math.sin(rad),
+        c = Math.cos(rad),
+        a00 = a[0],
+        a01 = a[1],
+        a02 = a[2],
+        a03 = a[3],
+        a20 = a[8],
+        a21 = a[9],
+        a22 = a[10],
+        a23 = a[11];
+
+    if (a !== out) { // If the source and destination differ, copy the unchanged rows
+        out[4]  = a[4];
+        out[5]  = a[5];
+        out[6]  = a[6];
+        out[7]  = a[7];
+        out[12] = a[12];
+        out[13] = a[13];
+        out[14] = a[14];
+        out[15] = a[15];
+    }
+
+    // Perform axis-specific matrix multiplication
+    out[0] = a00 * c - a20 * s;
+    out[1] = a01 * c - a21 * s;
+    out[2] = a02 * c - a22 * s;
+    out[3] = a03 * c - a23 * s;
+    out[8] = a00 * s + a20 * c;
+    out[9] = a01 * s + a21 * c;
+    out[10] = a02 * s + a22 * c;
+    out[11] = a03 * s + a23 * c;
+    return out;
+};
+
+/**
+ * Rotates a matrix by the given angle around the Z axis
+ *
+ * @param {mat4} out the receiving matrix
+ * @param {mat4} a the matrix to rotate
+ * @param {Number} rad the angle to rotate the matrix by
+ * @returns {mat4} out
+ */
+mat4.rotateZ = function (out, a, rad) {
+    var s = Math.sin(rad),
+        c = Math.cos(rad),
+        a00 = a[0],
+        a01 = a[1],
+        a02 = a[2],
+        a03 = a[3],
+        a10 = a[4],
+        a11 = a[5],
+        a12 = a[6],
+        a13 = a[7];
+
+    if (a !== out) { // If the source and destination differ, copy the unchanged last row
+        out[8]  = a[8];
+        out[9]  = a[9];
+        out[10] = a[10];
+        out[11] = a[11];
+        out[12] = a[12];
+        out[13] = a[13];
+        out[14] = a[14];
+        out[15] = a[15];
+    }
+
+    // Perform axis-specific matrix multiplication
+    out[0] = a00 * c + a10 * s;
+    out[1] = a01 * c + a11 * s;
+    out[2] = a02 * c + a12 * s;
+    out[3] = a03 * c + a13 * s;
+    out[4] = a10 * c - a00 * s;
+    out[5] = a11 * c - a01 * s;
+    out[6] = a12 * c - a02 * s;
+    out[7] = a13 * c - a03 * s;
+    return out;
+};
+
+/**
+ * Creates a matrix from a quaternion rotation and vector translation
+ * This is equivalent to (but much faster than):
+ *
+ *     mat4.identity(dest);
+ *     mat4.translate(dest, vec);
+ *     var quatMat = mat4.create();
+ *     quat4.toMat4(quat, quatMat);
+ *     mat4.multiply(dest, quatMat);
+ *
+ * @param {mat4} out mat4 receiving operation result
+ * @param {quat4} q Rotation quaternion
+ * @param {vec3} v Translation vector
+ * @returns {mat4} out
+ */
+mat4.fromRotationTranslation = function (out, q, v) {
+    // Quaternion math
+    var x = q[0], y = q[1], z = q[2], w = q[3],
+        x2 = x + x,
+        y2 = y + y,
+        z2 = z + z,
+
+        xx = x * x2,
+        xy = x * y2,
+        xz = x * z2,
+        yy = y * y2,
+        yz = y * z2,
+        zz = z * z2,
+        wx = w * x2,
+        wy = w * y2,
+        wz = w * z2;
+
+    out[0] = 1 - (yy + zz);
+    out[1] = xy + wz;
+    out[2] = xz - wy;
+    out[3] = 0;
+    out[4] = xy - wz;
+    out[5] = 1 - (xx + zz);
+    out[6] = yz + wx;
+    out[7] = 0;
+    out[8] = xz + wy;
+    out[9] = yz - wx;
+    out[10] = 1 - (xx + yy);
+    out[11] = 0;
+    out[12] = v[0];
+    out[13] = v[1];
+    out[14] = v[2];
+    out[15] = 1;
+    
+    return out;
+};
+
+/**
+ * Generates a frustum matrix with the given bounds
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {Number} left Left bound of the frustum
+ * @param {Number} right Right bound of the frustum
+ * @param {Number} bottom Bottom bound of the frustum
+ * @param {Number} top Top bound of the frustum
+ * @param {Number} near Near bound of the frustum
+ * @param {Number} far Far bound of the frustum
+ * @returns {mat4} out
+ */
+mat4.frustum = function (out, left, right, bottom, top, near, far) {
+    var rl = 1 / (right - left),
+        tb = 1 / (top - bottom),
+        nf = 1 / (near - far);
+    out[0] = (near * 2) * rl;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = (near * 2) * tb;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = (right + left) * rl;
+    out[9] = (top + bottom) * tb;
+    out[10] = (far + near) * nf;
+    out[11] = -1;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = (far * near * 2) * nf;
+    out[15] = 0;
+    return out;
+};
+
+/**
+ * Generates a perspective projection matrix with the given bounds
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {number} fovy Vertical field of view in radians
+ * @param {number} aspect Aspect ratio. typically viewport width/height
+ * @param {number} near Near bound of the frustum
+ * @param {number} far Far bound of the frustum
+ * @returns {mat4} out
+ */
+mat4.perspective = function (out, fovy, aspect, near, far) {
+    var f = 1.0 / Math.tan(fovy / 2),
+        nf = 1 / (near - far);
+    out[0] = f / aspect;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = f;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = (far + near) * nf;
+    out[11] = -1;
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = (2 * far * near) * nf;
+    out[15] = 0;
+    return out;
+};
+
+/**
+ * Generates a orthogonal projection matrix with the given bounds
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {number} left Left bound of the frustum
+ * @param {number} right Right bound of the frustum
+ * @param {number} bottom Bottom bound of the frustum
+ * @param {number} top Top bound of the frustum
+ * @param {number} near Near bound of the frustum
+ * @param {number} far Far bound of the frustum
+ * @returns {mat4} out
+ */
+mat4.ortho = function (out, left, right, bottom, top, near, far) {
+    var lr = 1 / (left - right),
+        bt = 1 / (bottom - top),
+        nf = 1 / (near - far);
+    out[0] = -2 * lr;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+    out[4] = 0;
+    out[5] = -2 * bt;
+    out[6] = 0;
+    out[7] = 0;
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = 2 * nf;
+    out[11] = 0;
+    out[12] = (left + right) * lr;
+    out[13] = (top + bottom) * bt;
+    out[14] = (far + near) * nf;
+    out[15] = 1;
+    return out;
+};
+
+/**
+ * Generates a look-at matrix with the given eye position, focal point, and up axis
+ *
+ * @param {mat4} out mat4 frustum matrix will be written into
+ * @param {vec3} eye Position of the viewer
+ * @param {vec3} center Point the viewer is looking at
+ * @param {vec3} up vec3 pointing up
+ * @returns {mat4} out
+ */
+mat4.lookAt = function (out, eye, center, up) {
+    var x0, x1, x2, y0, y1, y2, z0, z1, z2, len,
+        eyex = eye[0],
+        eyey = eye[1],
+        eyez = eye[2],
+        upx = up[0],
+        upy = up[1],
+        upz = up[2],
+        centerx = center[0],
+        centery = center[1],
+        centerz = center[2];
+
+    if (Math.abs(eyex - centerx) < GLMAT_EPSILON &&
+        Math.abs(eyey - centery) < GLMAT_EPSILON &&
+        Math.abs(eyez - centerz) < GLMAT_EPSILON) {
+        return mat4.identity(out);
+    }
+
+    z0 = eyex - centerx;
+    z1 = eyey - centery;
+    z2 = eyez - centerz;
+
+    len = 1 / Math.sqrt(z0 * z0 + z1 * z1 + z2 * z2);
+    z0 *= len;
+    z1 *= len;
+    z2 *= len;
+
+    x0 = upy * z2 - upz * z1;
+    x1 = upz * z0 - upx * z2;
+    x2 = upx * z1 - upy * z0;
+    len = Math.sqrt(x0 * x0 + x1 * x1 + x2 * x2);
+    if (!len) {
+        x0 = 0;
+        x1 = 0;
+        x2 = 0;
+    } else {
+        len = 1 / len;
+        x0 *= len;
+        x1 *= len;
+        x2 *= len;
+    }
+
+    y0 = z1 * x2 - z2 * x1;
+    y1 = z2 * x0 - z0 * x2;
+    y2 = z0 * x1 - z1 * x0;
+
+    len = Math.sqrt(y0 * y0 + y1 * y1 + y2 * y2);
+    if (!len) {
+        y0 = 0;
+        y1 = 0;
+        y2 = 0;
+    } else {
+        len = 1 / len;
+        y0 *= len;
+        y1 *= len;
+        y2 *= len;
+    }
+
+    out[0] = x0;
+    out[1] = y0;
+    out[2] = z0;
+    out[3] = 0;
+    out[4] = x1;
+    out[5] = y1;
+    out[6] = z1;
+    out[7] = 0;
+    out[8] = x2;
+    out[9] = y2;
+    out[10] = z2;
+    out[11] = 0;
+    out[12] = -(x0 * eyex + x1 * eyey + x2 * eyez);
+    out[13] = -(y0 * eyex + y1 * eyey + y2 * eyez);
+    out[14] = -(z0 * eyex + z1 * eyey + z2 * eyez);
+    out[15] = 1;
+
+    return out;
+};
+
+/**
+ * Returns a string representation of a mat4
+ *
+ * @param {mat4} mat matrix to represent as a string
+ * @returns {String} string representation of the matrix
+ */
+mat4.str = function (a) {
+    return 'mat4(' + a[0] + ', ' + a[1] + ', ' + a[2] + ', ' + a[3] + ', ' +
+                    a[4] + ', ' + a[5] + ', ' + a[6] + ', ' + a[7] + ', ' +
+                    a[8] + ', ' + a[9] + ', ' + a[10] + ', ' + a[11] + ', ' + 
+                    a[12] + ', ' + a[13] + ', ' + a[14] + ', ' + a[15] + ')';
+};
+
+if(typeof(exports) !== 'undefined') {
+    exports.mat4 = mat4;
+}
+;
+/* Copyright (c) 2012, Brandon Jones, Colin MacKenzie IV. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+  * Redistributions of source code must retain the above copyright notice, this
+    list of conditions and the following disclaimer.
+  * Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation 
+    and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+
+/**
+ * @class Quaternion
+ * @name quat
+ */
+
+var quat = {};
+
+var quatIdentity = new Float32Array([0, 0, 0, 1]);
+
+if(!GLMAT_EPSILON) {
+    var GLMAT_EPSILON = 0.000001;
+}
+
+/**
+ * Creates a new identity quat
+ *
+ * @returns {quat} a new quaternion
+ */
+quat.create = function() {
+    return new Float32Array(quatIdentity);
+};
+
+/**
+ * Creates a new quat initialized with values from an existing quaternion
+ *
+ * @param {quat} a quaternion to clone
+ * @returns {quat} a new quaternion
+ */
+quat.clone = vec4.clone;
+
+/**
+ * Creates a new quat initialized with the given values
+ *
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @param {Number} z Z component
+ * @param {Number} w W component
+ * @returns {quat} a new quaternion
+ */
+quat.fromValues = vec4.fromValues;
+
+/**
+ * Copy the values from one quat to another
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a the source quaternion
+ * @returns {quat} out
+ */
+quat.copy = vec4.copy;
+
+/**
+ * Set the components of a quat to the given values
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {Number} x X component
+ * @param {Number} y Y component
+ * @param {Number} z Z component
+ * @param {Number} w W component
+ * @returns {quat} out
+ */
+quat.set = vec4.set;
+
+/**
+ * Set a quat to the identity quaternion
+ *
+ * @param {quat} out the receiving quaternion
+ * @returns {quat} out
+ */
+quat.identity = function(out) {
+    out[0] = 0;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 1;
+    return out;
+};
+
+/**
+ * Sets a quat from the given angle and rotation axis,
+ * then returns it.
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {vec3} axis the axis around which to rotate
+ * @param {Number} rad the angle in radians
+ * @returns {quat} out
+ **/
+quat.setAxisAngle = function(out, axis, rad) {
+    rad = rad * 0.5;
+    var s = Math.sin(rad);
+    out[0] = s * axis[0];
+    out[1] = s * axis[1];
+    out[2] = s * axis[2];
+    out[3] = Math.cos(rad);
+    return out;
+};
+
+/**
+ * Adds two quat's
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a the first operand
+ * @param {quat} b the second operand
+ * @returns {quat} out
+ */
+quat.add = vec4.add;
+
+/**
+ * Multiplies two quat's
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a the first operand
+ * @param {quat} b the second operand
+ * @returns {quat} out
+ */
+quat.mul = quat.multiply = function(out, a, b) {
+    var ax = a[0], ay = a[1], az = a[2], aw = a[3],
+        bx = b[0], by = b[1], bz = b[2], bw = b[3];
+
+    out[0] = ax * bw + aw * bx + ay * bz - az * by;
+    out[1] = ay * bw + aw * by + az * bx - ax * bz;
+    out[2] = az * bw + aw * bz + ax * by - ay * bx;
+    out[3] = aw * bw - ax * bx - ay * by - az * bz;
+    return out;
+};
+
+/**
+ * Scales a quat by a scalar number
+ *
+ * @param {quat} out the receiving vector
+ * @param {quat} a the vector to scale
+ * @param {quat} b amount to scale the vector by
+ * @returns {quat} out
+ */
+quat.scale = vec4.scale;
+
+/**
+ * Rotates a quaternion by the given angle around the X axis
+ *
+ * @param {quat} out quat receiving operation result
+ * @param {quat} a quat to rotate
+ * @param {number} rad angle (in radians) to rotate
+ * @returns {quat} out
+ */
+quat.rotateX = function (out, a, rad) {
+    rad *= 0.5; 
+
+    var ax = a[0], ay = a[1], az = a[2], aw = a[3],
+        bx = Math.sin(rad), bw = Math.cos(rad);
+
+    out[0] = ax * bw + aw * bx;
+    out[1] = ay * bw + az * bx;
+    out[2] = az * bw - ay * bx;
+    out[3] = aw * bw - ax * bx;
+    return out;
+};
+
+/**
+ * Rotates a quaternion by the given angle around the X axis
+ *
+ * @param {quat} out quat receiving operation result
+ * @param {quat} a quat to rotate
+ * @param {number} rad angle (in radians) to rotate
+ * @returns {quat} out
+ */
+quat.rotateY = function (out, a, rad) {
+    rad *= 0.5; 
+
+    var ax = a[0], ay = a[1], az = a[2], aw = a[3],
+        by = Math.sin(rad), bw = Math.cos(rad);
+
+    out[0] = ax * bw - az * by;
+    out[1] = ay * bw + aw * by;
+    out[2] = az * bw + ax * by;
+    out[3] = aw * bw - ay * by;
+    return out;
+};
+
+/**
+ * Rotates a quaternion by the given angle around the X axis
+ *
+ * @param {quat} out quat receiving operation result
+ * @param {quat} a quat to rotate
+ * @param {number} rad angle (in radians) to rotate
+ * @returns {quat} out
+ */
+quat.rotateZ = function (out, a, rad) {
+    rad *= 0.5; 
+
+    var ax = a[0], ay = a[1], az = a[2], aw = a[3],
+        bz = Math.sin(rad), bw = Math.cos(rad);
+
+    out[0] = ax * bw + ay * bz;
+    out[1] = ay * bw - ax * bz;
+    out[2] = az * bw + aw * bz;
+    out[3] = aw * bw - az * bz;
+    return out;
+};
+
+/**
+ * Calculates the W component of a quat from the X, Y, and Z components.
+ * Assumes that quaternion is 1 unit in length.
+ * Any existing W component will be ignored.
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a quat to calculate W component of
+ * @returns {quat} out
+ */
+quat.calculateW = function (out, a) {
+    var x = a[0], y = a[1], z = a[2];
+
+    out[0] = x;
+    out[1] = y;
+    out[2] = z;
+    out[3] = -Math.sqrt(Math.abs(1.0 - x * x - y * y - z * z));
+    return out;
+};
+
+/**
+ * Caclulates the dot product of two quat's
+ *
+ * @param {quat} a the first operand
+ * @param {quat} b the second operand
+ * @returns {Number} dot product of a and b
+ */
+quat.dot = vec4.dot;
+
+/**
+ * Performs a linear interpolation between two quat's
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a the first operand
+ * @param {quat} b the second operand
+ * @param {Number} t interpolation amount between the two inputs
+ * @returns {quat} out
+ */
+quat.lerp = vec4.lerp;
+
+/**
+ * Performs a spherical linear interpolation between two quat
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a the first operand
+ * @param {quat} b the second operand
+ * @param {Number} t interpolation amount between the two inputs
+ * @returns {quat} out
+ */
+quat.slerp = function (out, a, b, t) {
+    var ax = a[0], ay = a[1], az = a[2], aw = a[3],
+        bx = b[0], by = b[1], bz = b[2], bw = a[3];
+
+    var cosHalfTheta = ax * bx + ay * by + az * bz + aw * bw,
+        halfTheta,
+        sinHalfTheta,
+        ratioA,
+        ratioB;
+
+    if (Math.abs(cosHalfTheta) >= 1.0) {
+        if (out !== a) {
+            out[0] = ax;
+            out[1] = ay;
+            out[2] = az;
+            out[3] = aw;
+        }
+        return out;
+    }
+
+    halfTheta = Math.acos(cosHalfTheta);
+    sinHalfTheta = Math.sqrt(1.0 - cosHalfTheta * cosHalfTheta);
+
+    if (Math.abs(sinHalfTheta) < 0.001) {
+        out[0] = (ax * 0.5 + bx * 0.5);
+        out[1] = (ay * 0.5 + by * 0.5);
+        out[2] = (az * 0.5 + bz * 0.5);
+        out[3] = (aw * 0.5 + bw * 0.5);
+        return out;
+    }
+
+    ratioA = Math.sin((1 - t) * halfTheta) / sinHalfTheta;
+    ratioB = Math.sin(t * halfTheta) / sinHalfTheta;
+
+    out[0] = (ax * ratioA + bx * ratioB);
+    out[1] = (ay * ratioA + by * ratioB);
+    out[2] = (az * ratioA + bz * ratioB);
+    out[3] = (aw * ratioA + bw * ratioB);
+
+    return out;
+};
+
+/**
+ * Calculates the inverse of a quat
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a quat to calculate inverse of
+ * @returns {quat} out
+ */
+quat.invert = function(out, a) {
+    var a0 = a[0], a1 = a[1], a2 = a[2], a3 = a[3],
+        dot = a0*a0 + a1*a1 + a2*a2 + a3*a3,
+        invDot = dot ? 1.0/dot : 0;
+    
+    // TODO: Would be faster to return [0,0,0,0] immediately if dot == 0
+
+    out[0] = -a0*invDot;
+    out[1] = -a1*invDot;
+    out[2] = -a2*invDot;
+    out[3] = a3*invDot;
+    return out;
+};
+
+/**
+ * Calculates the conjugate of a quat
+ * If the quaternion is normalized, this function is faster than quat.inverse and produces the same result.
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a quat to calculate conjugate of
+ * @returns {quat} out
+ */
+quat.conjugate = function (out, a) {
+    out[0] = -a[0];
+    out[1] = -a[1];
+    out[2] = -a[2];
+    out[3] = a[3];
+    return out;
+};
+
+/**
+ * Caclulates the length of a quat
+ *
+ * @param {quat} a vector to calculate length of
+ * @returns {Number} length of a
+ */
+quat.len = quat.length = vec4.length;
+
+/**
+ * Caclulates the squared length of a quat
+ *
+ * @param {quat} a vector to calculate squared length of
+ * @returns {Number} squared length of a
+ */
+quat.sqrLen = quat.squaredLength = vec4.squaredLength;
+
+/**
+ * Normalize a quat
+ *
+ * @param {quat} out the receiving quaternion
+ * @param {quat} a quaternion to normalize
+ * @returns {quat} out
+ */
+quat.normalize = vec4.normalize;
+
+/**
+ * Returns a string representation of a quatenion
+ *
+ * @param {quat} vec vector to represent as a string
+ * @returns {String} string representation of the vector
+ */
+quat.str = function (a) {
+    return 'quat(' + a[0] + ', ' + a[1] + ', ' + a[2] + ', ' + a[3] + ')';
+};
+
+if(typeof(exports) !== 'undefined') {
+    exports.quat = quat;
+}
+;
+
+
+
+
+
+
+
+
+
+
+  })(shim.exports);
+})();
+
+});
+
+require.define("/client.js",function(require,module,exports,__dirname,__filename,process,global){var game = require('voxel-hello-world')
+var regionChange = require('voxel-region-change')
+
+var voxelEl = document.querySelector('#voxel')
+var chunkEl = document.querySelector('#chunk')
+
+window.game = game // for debugging
+
+game.voxelRegion.on('change', function(pos) {
+  voxelEl.innerHTML = JSON.stringify(pos)
+})
+
+game.chunkRegion.on('change', function(pos) {
+  chunkEl.innerHTML = JSON.stringify(pos)
+})
+
 
 });
 require("/client.js");
