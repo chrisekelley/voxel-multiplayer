@@ -1,5 +1,4 @@
 var game = require('voxel-hello-world')
-var regionChange = require('voxel-region-change')
 
 var voxelEl = document.querySelector('#voxel')
 var chunkEl = document.querySelector('#chunk')
