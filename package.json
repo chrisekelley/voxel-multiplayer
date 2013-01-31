@@ -1,6 +1,6 @@
 {
   "name": "voxel-multiplayer",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "devDependencies": {
     "voxel-engine": "0.4.3",
     "voxel": "0.1.3",
