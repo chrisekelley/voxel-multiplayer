@@ -432,6 +432,3742 @@ process.binding = function (name) {
 
 });
 
+require.define("url",function(require,module,exports,__dirname,__filename,process,global){var punycode = { encode : function (s) { return s } };
+
+exports.parse = urlParse;
+exports.resolve = urlResolve;
+exports.resolveObject = urlResolveObject;
+exports.format = urlFormat;
+
+function arrayIndexOf(array, subject) {
+    for (var i = 0, j = array.length; i < j; i++) {
+        if(array[i] == subject) return i;
+    }
+    return -1;
+}
+
+var objectKeys = Object.keys || function objectKeys(object) {
+    if (object !== Object(object)) throw new TypeError('Invalid object');
+    var keys = [];
+    for (var key in object) if (object.hasOwnProperty(key)) keys[keys.length] = key;
+    return keys;
+}
+
+// Reference: RFC 3986, RFC 1808, RFC 2396
+
+// define these here so at least they only have to be
+// compiled once on the first module load.
+var protocolPattern = /^([a-z0-9.+-]+:)/i,
+    portPattern = /:[0-9]+$/,
+    // RFC 2396: characters reserved for delimiting URLs.
+    delims = ['<', '>', '"', '`', ' ', '\r', '\n', '\t'],
+    // RFC 2396: characters not allowed for various reasons.
+    unwise = ['{', '}', '|', '\\', '^', '~', '[', ']', '`'].concat(delims),
+    // Allowed by RFCs, but cause of XSS attacks.  Always escape these.
+    autoEscape = ['\''],
+    // Characters that are never ever allowed in a hostname.
+    // Note that any invalid chars are also handled, but these
+    // are the ones that are *expected* to be seen, so we fast-path
+    // them.
+    nonHostChars = ['%', '/', '?', ';', '#']
+      .concat(unwise).concat(autoEscape),
+    nonAuthChars = ['/', '@', '?', '#'].concat(delims),
+    hostnameMaxLen = 255,
+    hostnamePartPattern = /^[a-zA-Z0-9][a-z0-9A-Z_-]{0,62}$/,
+    hostnamePartStart = /^([a-zA-Z0-9][a-z0-9A-Z_-]{0,62})(.*)$/,
+    // protocols that can allow "unsafe" and "unwise" chars.
+    unsafeProtocol = {
+      'javascript': true,
+      'javascript:': true
+    },
+    // protocols that never have a hostname.
+    hostlessProtocol = {
+      'javascript': true,
+      'javascript:': true
+    },
+    // protocols that always have a path component.
+    pathedProtocol = {
+      'http': true,
+      'https': true,
+      'ftp': true,
+      'gopher': true,
+      'file': true,
+      'http:': true,
+      'ftp:': true,
+      'gopher:': true,
+      'file:': true
+    },
+    // protocols that always contain a // bit.
+    slashedProtocol = {
+      'http': true,
+      'https': true,
+      'ftp': true,
+      'gopher': true,
+      'file': true,
+      'http:': true,
+      'https:': true,
+      'ftp:': true,
+      'gopher:': true,
+      'file:': true
+    },
+    querystring = require('querystring');
+
+function urlParse(url, parseQueryString, slashesDenoteHost) {
+  if (url && typeof(url) === 'object' && url.href) return url;
+
+  if (typeof url !== 'string') {
+    throw new TypeError("Parameter 'url' must be a string, not " + typeof url);
+  }
+
+  var out = {},
+      rest = url;
+
+  // cut off any delimiters.
+  // This is to support parse stuff like "<http://foo.com>"
+  for (var i = 0, l = rest.length; i < l; i++) {
+    if (arrayIndexOf(delims, rest.charAt(i)) === -1) break;
+  }
+  if (i !== 0) rest = rest.substr(i);
+
+
+  var proto = protocolPattern.exec(rest);
+  if (proto) {
+    proto = proto[0];
+    var lowerProto = proto.toLowerCase();
+    out.protocol = lowerProto;
+    rest = rest.substr(proto.length);
+  }
+
+  // figure out if it's got a host
+  // user@server is *always* interpreted as a hostname, and url
+  // resolution will treat //foo/bar as host=foo,path=bar because that's
+  // how the browser resolves relative URLs.
+  if (slashesDenoteHost || proto || rest.match(/^\/\/[^@\/]+@[^@\/]+/)) {
+    var slashes = rest.substr(0, 2) === '//';
+    if (slashes && !(proto && hostlessProtocol[proto])) {
+      rest = rest.substr(2);
+      out.slashes = true;
+    }
+  }
+
+  if (!hostlessProtocol[proto] &&
+      (slashes || (proto && !slashedProtocol[proto]))) {
+    // there's a hostname.
+    // the first instance of /, ?, ;, or # ends the host.
+    // don't enforce full RFC correctness, just be unstupid about it.
+
+    // If there is an @ in the hostname, then non-host chars *are* allowed
+    // to the left of the first @ sign, unless some non-auth character
+    // comes *before* the @-sign.
+    // URLs are obnoxious.
+    var atSign = arrayIndexOf(rest, '@');
+    if (atSign !== -1) {
+      // there *may be* an auth
+      var hasAuth = true;
+      for (var i = 0, l = nonAuthChars.length; i < l; i++) {
+        var index = arrayIndexOf(rest, nonAuthChars[i]);
+        if (index !== -1 && index < atSign) {
+          // not a valid auth.  Something like http://foo.com/bar@baz/
+          hasAuth = false;
+          break;
+        }
+      }
+      if (hasAuth) {
+        // pluck off the auth portion.
+        out.auth = rest.substr(0, atSign);
+        rest = rest.substr(atSign + 1);
+      }
+    }
+
+    var firstNonHost = -1;
+    for (var i = 0, l = nonHostChars.length; i < l; i++) {
+      var index = arrayIndexOf(rest, nonHostChars[i]);
+      if (index !== -1 &&
+          (firstNonHost < 0 || index < firstNonHost)) firstNonHost = index;
+    }
+
+    if (firstNonHost !== -1) {
+      out.host = rest.substr(0, firstNonHost);
+      rest = rest.substr(firstNonHost);
+    } else {
+      out.host = rest;
+      rest = '';
+    }
+
+    // pull out port.
+    var p = parseHost(out.host);
+    var keys = objectKeys(p);
+    for (var i = 0, l = keys.length; i < l; i++) {
+      var key = keys[i];
+      out[key] = p[key];
+    }
+
+    // we've indicated that there is a hostname,
+    // so even if it's empty, it has to be present.
+    out.hostname = out.hostname || '';
+
+    // validate a little.
+    if (out.hostname.length > hostnameMaxLen) {
+      out.hostname = '';
+    } else {
+      var hostparts = out.hostname.split(/\./);
+      for (var i = 0, l = hostparts.length; i < l; i++) {
+        var part = hostparts[i];
+        if (!part) continue;
+        if (!part.match(hostnamePartPattern)) {
+          var newpart = '';
+          for (var j = 0, k = part.length; j < k; j++) {
+            if (part.charCodeAt(j) > 127) {
+              // we replace non-ASCII char with a temporary placeholder
+              // we need this to make sure size of hostname is not
+              // broken by replacing non-ASCII by nothing
+              newpart += 'x';
+            } else {
+              newpart += part[j];
+            }
+          }
+          // we test again with ASCII char only
+          if (!newpart.match(hostnamePartPattern)) {
+            var validParts = hostparts.slice(0, i);
+            var notHost = hostparts.slice(i + 1);
+            var bit = part.match(hostnamePartStart);
+            if (bit) {
+              validParts.push(bit[1]);
+              notHost.unshift(bit[2]);
+            }
+            if (notHost.length) {
+              rest = '/' + notHost.join('.') + rest;
+            }
+            out.hostname = validParts.join('.');
+            break;
+          }
+        }
+      }
+    }
+
+    // hostnames are always lower case.
+    out.hostname = out.hostname.toLowerCase();
+
+    // IDNA Support: Returns a puny coded representation of "domain".
+    // It only converts the part of the domain name that
+    // has non ASCII characters. I.e. it dosent matter if
+    // you call it with a domain that already is in ASCII.
+    var domainArray = out.hostname.split('.');
+    var newOut = [];
+    for (var i = 0; i < domainArray.length; ++i) {
+      var s = domainArray[i];
+      newOut.push(s.match(/[^A-Za-z0-9_-]/) ?
+          'xn--' + punycode.encode(s) : s);
+    }
+    out.hostname = newOut.join('.');
+
+    out.host = (out.hostname || '') +
+        ((out.port) ? ':' + out.port : '');
+    out.href += out.host;
+  }
+
+  // now rest is set to the post-host stuff.
+  // chop off any delim chars.
+  if (!unsafeProtocol[lowerProto]) {
+
+    // First, make 100% sure that any "autoEscape" chars get
+    // escaped, even if encodeURIComponent doesn't think they
+    // need to be.
+    for (var i = 0, l = autoEscape.length; i < l; i++) {
+      var ae = autoEscape[i];
+      var esc = encodeURIComponent(ae);
+      if (esc === ae) {
+        esc = escape(ae);
+      }
+      rest = rest.split(ae).join(esc);
+    }
+
+    // Now make sure that delims never appear in a url.
+    var chop = rest.length;
+    for (var i = 0, l = delims.length; i < l; i++) {
+      var c = arrayIndexOf(rest, delims[i]);
+      if (c !== -1) {
+        chop = Math.min(c, chop);
+      }
+    }
+    rest = rest.substr(0, chop);
+  }
+
+
+  // chop off from the tail first.
+  var hash = arrayIndexOf(rest, '#');
+  if (hash !== -1) {
+    // got a fragment string.
+    out.hash = rest.substr(hash);
+    rest = rest.slice(0, hash);
+  }
+  var qm = arrayIndexOf(rest, '?');
+  if (qm !== -1) {
+    out.search = rest.substr(qm);
+    out.query = rest.substr(qm + 1);
+    if (parseQueryString) {
+      out.query = querystring.parse(out.query);
+    }
+    rest = rest.slice(0, qm);
+  } else if (parseQueryString) {
+    // no query string, but parseQueryString still requested
+    out.search = '';
+    out.query = {};
+  }
+  if (rest) out.pathname = rest;
+  if (slashedProtocol[proto] &&
+      out.hostname && !out.pathname) {
+    out.pathname = '/';
+  }
+
+  //to support http.request
+  if (out.pathname || out.search) {
+    out.path = (out.pathname ? out.pathname : '') +
+               (out.search ? out.search : '');
+  }
+
+  // finally, reconstruct the href based on what has been validated.
+  out.href = urlFormat(out);
+  return out;
+}
+
+// format a parsed object into a url string
+function urlFormat(obj) {
+  // ensure it's an object, and not a string url.
+  // If it's an obj, this is a no-op.
+  // this way, you can call url_format() on strings
+  // to clean up potentially wonky urls.
+  if (typeof(obj) === 'string') obj = urlParse(obj);
+
+  var auth = obj.auth || '';
+  if (auth) {
+    auth = auth.split('@').join('%40');
+    for (var i = 0, l = nonAuthChars.length; i < l; i++) {
+      var nAC = nonAuthChars[i];
+      auth = auth.split(nAC).join(encodeURIComponent(nAC));
+    }
+    auth += '@';
+  }
+
+  var protocol = obj.protocol || '',
+      host = (obj.host !== undefined) ? auth + obj.host :
+          obj.hostname !== undefined ? (
+              auth + obj.hostname +
+              (obj.port ? ':' + obj.port : '')
+          ) :
+          false,
+      pathname = obj.pathname || '',
+      query = obj.query &&
+              ((typeof obj.query === 'object' &&
+                objectKeys(obj.query).length) ?
+                 querystring.stringify(obj.query) :
+                 '') || '',
+      search = obj.search || (query && ('?' + query)) || '',
+      hash = obj.hash || '';
+
+  if (protocol && protocol.substr(-1) !== ':') protocol += ':';
+
+  // only the slashedProtocols get the //.  Not mailto:, xmpp:, etc.
+  // unless they had them to begin with.
+  if (obj.slashes ||
+      (!protocol || slashedProtocol[protocol]) && host !== false) {
+    host = '//' + (host || '');
+    if (pathname && pathname.charAt(0) !== '/') pathname = '/' + pathname;
+  } else if (!host) {
+    host = '';
+  }
+
+  if (hash && hash.charAt(0) !== '#') hash = '#' + hash;
+  if (search && search.charAt(0) !== '?') search = '?' + search;
+
+  return protocol + host + pathname + search + hash;
+}
+
+function urlResolve(source, relative) {
+  return urlFormat(urlResolveObject(source, relative));
+}
+
+function urlResolveObject(source, relative) {
+  if (!source) return relative;
+
+  source = urlParse(urlFormat(source), false, true);
+  relative = urlParse(urlFormat(relative), false, true);
+
+  // hash is always overridden, no matter what.
+  source.hash = relative.hash;
+
+  if (relative.href === '') {
+    source.href = urlFormat(source);
+    return source;
+  }
+
+  // hrefs like //foo/bar always cut to the protocol.
+  if (relative.slashes && !relative.protocol) {
+    relative.protocol = source.protocol;
+    //urlParse appends trailing / to urls like http://www.example.com
+    if (slashedProtocol[relative.protocol] &&
+        relative.hostname && !relative.pathname) {
+      relative.path = relative.pathname = '/';
+    }
+    relative.href = urlFormat(relative);
+    return relative;
+  }
+
+  if (relative.protocol && relative.protocol !== source.protocol) {
+    // if it's a known url protocol, then changing
+    // the protocol does weird things
+    // first, if it's not file:, then we MUST have a host,
+    // and if there was a path
+    // to begin with, then we MUST have a path.
+    // if it is file:, then the host is dropped,
+    // because that's known to be hostless.
+    // anything else is assumed to be absolute.
+    if (!slashedProtocol[relative.protocol]) {
+      relative.href = urlFormat(relative);
+      return relative;
+    }
+    source.protocol = relative.protocol;
+    if (!relative.host && !hostlessProtocol[relative.protocol]) {
+      var relPath = (relative.pathname || '').split('/');
+      while (relPath.length && !(relative.host = relPath.shift()));
+      if (!relative.host) relative.host = '';
+      if (!relative.hostname) relative.hostname = '';
+      if (relPath[0] !== '') relPath.unshift('');
+      if (relPath.length < 2) relPath.unshift('');
+      relative.pathname = relPath.join('/');
+    }
+    source.pathname = relative.pathname;
+    source.search = relative.search;
+    source.query = relative.query;
+    source.host = relative.host || '';
+    source.auth = relative.auth;
+    source.hostname = relative.hostname || relative.host;
+    source.port = relative.port;
+    //to support http.request
+    if (source.pathname !== undefined || source.search !== undefined) {
+      source.path = (source.pathname ? source.pathname : '') +
+                    (source.search ? source.search : '');
+    }
+    source.slashes = source.slashes || relative.slashes;
+    source.href = urlFormat(source);
+    return source;
+  }
+
+  var isSourceAbs = (source.pathname && source.pathname.charAt(0) === '/'),
+      isRelAbs = (
+          relative.host !== undefined ||
+          relative.pathname && relative.pathname.charAt(0) === '/'
+      ),
+      mustEndAbs = (isRelAbs || isSourceAbs ||
+                    (source.host && relative.pathname)),
+      removeAllDots = mustEndAbs,
+      srcPath = source.pathname && source.pathname.split('/') || [],
+      relPath = relative.pathname && relative.pathname.split('/') || [],
+      psychotic = source.protocol &&
+          !slashedProtocol[source.protocol];
+
+  // if the url is a non-slashed url, then relative
+  // links like ../.. should be able
+  // to crawl up to the hostname, as well.  This is strange.
+  // source.protocol has already been set by now.
+  // Later on, put the first path part into the host field.
+  if (psychotic) {
+
+    delete source.hostname;
+    delete source.port;
+    if (source.host) {
+      if (srcPath[0] === '') srcPath[0] = source.host;
+      else srcPath.unshift(source.host);
+    }
+    delete source.host;
+    if (relative.protocol) {
+      delete relative.hostname;
+      delete relative.port;
+      if (relative.host) {
+        if (relPath[0] === '') relPath[0] = relative.host;
+        else relPath.unshift(relative.host);
+      }
+      delete relative.host;
+    }
+    mustEndAbs = mustEndAbs && (relPath[0] === '' || srcPath[0] === '');
+  }
+
+  if (isRelAbs) {
+    // it's absolute.
+    source.host = (relative.host || relative.host === '') ?
+                      relative.host : source.host;
+    source.hostname = (relative.hostname || relative.hostname === '') ?
+                      relative.hostname : source.hostname;
+    source.search = relative.search;
+    source.query = relative.query;
+    srcPath = relPath;
+    // fall through to the dot-handling below.
+  } else if (relPath.length) {
+    // it's relative
+    // throw away the existing file, and take the new path instead.
+    if (!srcPath) srcPath = [];
+    srcPath.pop();
+    srcPath = srcPath.concat(relPath);
+    source.search = relative.search;
+    source.query = relative.query;
+  } else if ('search' in relative) {
+    // just pull out the search.
+    // like href='?foo'.
+    // Put this after the other two cases because it simplifies the booleans
+    if (psychotic) {
+      source.hostname = source.host = srcPath.shift();
+      //occationaly the auth can get stuck only in host
+      //this especialy happens in cases like
+      //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
+      var authInHost = source.host && arrayIndexOf(source.host, '@') > 0 ?
+                       source.host.split('@') : false;
+      if (authInHost) {
+        source.auth = authInHost.shift();
+        source.host = source.hostname = authInHost.shift();
+      }
+    }
+    source.search = relative.search;
+    source.query = relative.query;
+    //to support http.request
+    if (source.pathname !== undefined || source.search !== undefined) {
+      source.path = (source.pathname ? source.pathname : '') +
+                    (source.search ? source.search : '');
+    }
+    source.href = urlFormat(source);
+    return source;
+  }
+  if (!srcPath.length) {
+    // no path at all.  easy.
+    // we've already handled the other stuff above.
+    delete source.pathname;
+    //to support http.request
+    if (!source.search) {
+      source.path = '/' + source.search;
+    } else {
+      delete source.path;
+    }
+    source.href = urlFormat(source);
+    return source;
+  }
+  // if a url ENDs in . or .., then it must get a trailing slash.
+  // however, if it ends in anything else non-slashy,
+  // then it must NOT get a trailing slash.
+  var last = srcPath.slice(-1)[0];
+  var hasTrailingSlash = (
+      (source.host || relative.host) && (last === '.' || last === '..') ||
+      last === '');
+
+  // strip single dots, resolve double dots to parent dir
+  // if the path tries to go above the root, `up` ends up > 0
+  var up = 0;
+  for (var i = srcPath.length; i >= 0; i--) {
+    last = srcPath[i];
+    if (last == '.') {
+      srcPath.splice(i, 1);
+    } else if (last === '..') {
+      srcPath.splice(i, 1);
+      up++;
+    } else if (up) {
+      srcPath.splice(i, 1);
+      up--;
+    }
+  }
+
+  // if the path is allowed to go above the root, restore leading ..s
+  if (!mustEndAbs && !removeAllDots) {
+    for (; up--; up) {
+      srcPath.unshift('..');
+    }
+  }
+
+  if (mustEndAbs && srcPath[0] !== '' &&
+      (!srcPath[0] || srcPath[0].charAt(0) !== '/')) {
+    srcPath.unshift('');
+  }
+
+  if (hasTrailingSlash && (srcPath.join('/').substr(-1) !== '/')) {
+    srcPath.push('');
+  }
+
+  var isAbsolute = srcPath[0] === '' ||
+      (srcPath[0] && srcPath[0].charAt(0) === '/');
+
+  // put the host back
+  if (psychotic) {
+    source.hostname = source.host = isAbsolute ? '' :
+                                    srcPath.length ? srcPath.shift() : '';
+    //occationaly the auth can get stuck only in host
+    //this especialy happens in cases like
+    //url.resolveObject('mailto:local1@domain1', 'local2@domain2')
+    var authInHost = source.host && arrayIndexOf(source.host, '@') > 0 ?
+                     source.host.split('@') : false;
+    if (authInHost) {
+      source.auth = authInHost.shift();
+      source.host = source.hostname = authInHost.shift();
+    }
+  }
+
+  mustEndAbs = mustEndAbs || (source.host && srcPath.length);
+
+  if (mustEndAbs && !isAbsolute) {
+    srcPath.unshift('');
+  }
+
+  source.pathname = srcPath.join('/');
+  //to support request.http
+  if (source.pathname !== undefined || source.search !== undefined) {
+    source.path = (source.pathname ? source.pathname : '') +
+                  (source.search ? source.search : '');
+  }
+  source.auth = relative.auth || source.auth;
+  source.slashes = source.slashes || relative.slashes;
+  source.href = urlFormat(source);
+  return source;
+}
+
+function parseHost(host) {
+  var out = {};
+  var port = portPattern.exec(host);
+  if (port) {
+    port = port[0];
+    out.port = port.substr(1);
+    host = host.substr(0, host.length - port.length);
+  }
+  if (host) out.hostname = host;
+  return out;
+}
+
+});
+
+require.define("querystring",function(require,module,exports,__dirname,__filename,process,global){var isArray = typeof Array.isArray === 'function'
+    ? Array.isArray
+    : function (xs) {
+        return Object.prototype.toString.call(xs) === '[object Array]'
+    };
+
+var objectKeys = Object.keys || function objectKeys(object) {
+    if (object !== Object(object)) throw new TypeError('Invalid object');
+    var keys = [];
+    for (var key in object) if (object.hasOwnProperty(key)) keys[keys.length] = key;
+    return keys;
+}
+
+
+/*!
+ * querystring
+ * Copyright(c) 2010 TJ Holowaychuk <tj@vision-media.ca>
+ * MIT Licensed
+ */
+
+/**
+ * Library version.
+ */
+
+exports.version = '0.3.1';
+
+/**
+ * Object#toString() ref for stringify().
+ */
+
+var toString = Object.prototype.toString;
+
+/**
+ * Cache non-integer test regexp.
+ */
+
+var notint = /[^0-9]/;
+
+/**
+ * Parse the given query `str`, returning an object.
+ *
+ * @param {String} str
+ * @return {Object}
+ * @api public
+ */
+
+exports.parse = function(str){
+  if (null == str || '' == str) return {};
+
+  function promote(parent, key) {
+    if (parent[key].length == 0) return parent[key] = {};
+    var t = {};
+    for (var i in parent[key]) t[i] = parent[key][i];
+    parent[key] = t;
+    return t;
+  }
+
+  return String(str)
+    .split('&')
+    .reduce(function(ret, pair){
+      try{ 
+        pair = decodeURIComponent(pair.replace(/\+/g, ' '));
+      } catch(e) {
+        // ignore
+      }
+
+      var eql = pair.indexOf('=')
+        , brace = lastBraceInKey(pair)
+        , key = pair.substr(0, brace || eql)
+        , val = pair.substr(brace || eql, pair.length)
+        , val = val.substr(val.indexOf('=') + 1, val.length)
+        , parent = ret;
+
+      // ?foo
+      if ('' == key) key = pair, val = '';
+
+      // nested
+      if (~key.indexOf(']')) {
+        var parts = key.split('[')
+          , len = parts.length
+          , last = len - 1;
+
+        function parse(parts, parent, key) {
+          var part = parts.shift();
+
+          // end
+          if (!part) {
+            if (isArray(parent[key])) {
+              parent[key].push(val);
+            } else if ('object' == typeof parent[key]) {
+              parent[key] = val;
+            } else if ('undefined' == typeof parent[key]) {
+              parent[key] = val;
+            } else {
+              parent[key] = [parent[key], val];
+            }
+          // array
+          } else {
+            obj = parent[key] = parent[key] || [];
+            if (']' == part) {
+              if (isArray(obj)) {
+                if ('' != val) obj.push(val);
+              } else if ('object' == typeof obj) {
+                obj[objectKeys(obj).length] = val;
+              } else {
+                obj = parent[key] = [parent[key], val];
+              }
+            // prop
+            } else if (~part.indexOf(']')) {
+              part = part.substr(0, part.length - 1);
+              if(notint.test(part) && isArray(obj)) obj = promote(parent, key);
+              parse(parts, obj, part);
+            // key
+            } else {
+              if(notint.test(part) && isArray(obj)) obj = promote(parent, key);
+              parse(parts, obj, part);
+            }
+          }
+        }
+
+        parse(parts, parent, 'base');
+      // optimize
+      } else {
+        if (notint.test(key) && isArray(parent.base)) {
+          var t = {};
+          for(var k in parent.base) t[k] = parent.base[k];
+          parent.base = t;
+        }
+        set(parent.base, key, val);
+      }
+
+      return ret;
+    }, {base: {}}).base;
+};
+
+/**
+ * Turn the given `obj` into a query string
+ *
+ * @param {Object} obj
+ * @return {String}
+ * @api public
+ */
+
+var stringify = exports.stringify = function(obj, prefix) {
+  if (isArray(obj)) {
+    return stringifyArray(obj, prefix);
+  } else if ('[object Object]' == toString.call(obj)) {
+    return stringifyObject(obj, prefix);
+  } else if ('string' == typeof obj) {
+    return stringifyString(obj, prefix);
+  } else {
+    return prefix;
+  }
+};
+
+/**
+ * Stringify the given `str`.
+ *
+ * @param {String} str
+ * @param {String} prefix
+ * @return {String}
+ * @api private
+ */
+
+function stringifyString(str, prefix) {
+  if (!prefix) throw new TypeError('stringify expects an object');
+  return prefix + '=' + encodeURIComponent(str);
+}
+
+/**
+ * Stringify the given `arr`.
+ *
+ * @param {Array} arr
+ * @param {String} prefix
+ * @return {String}
+ * @api private
+ */
+
+function stringifyArray(arr, prefix) {
+  var ret = [];
+  if (!prefix) throw new TypeError('stringify expects an object');
+  for (var i = 0; i < arr.length; i++) {
+    ret.push(stringify(arr[i], prefix + '[]'));
+  }
+  return ret.join('&');
+}
+
+/**
+ * Stringify the given `obj`.
+ *
+ * @param {Object} obj
+ * @param {String} prefix
+ * @return {String}
+ * @api private
+ */
+
+function stringifyObject(obj, prefix) {
+  var ret = []
+    , keys = objectKeys(obj)
+    , key;
+  for (var i = 0, len = keys.length; i < len; ++i) {
+    key = keys[i];
+    ret.push(stringify(obj[key], prefix
+      ? prefix + '[' + encodeURIComponent(key) + ']'
+      : encodeURIComponent(key)));
+  }
+  return ret.join('&');
+}
+
+/**
+ * Set `obj`'s `key` to `val` respecting
+ * the weird and wonderful syntax of a qs,
+ * where "foo=bar&foo=baz" becomes an array.
+ *
+ * @param {Object} obj
+ * @param {String} key
+ * @param {String} val
+ * @api private
+ */
+
+function set(obj, key, val) {
+  var v = obj[key];
+  if (undefined === v) {
+    obj[key] = val;
+  } else if (isArray(v)) {
+    v.push(val);
+  } else {
+    obj[key] = [v, val];
+  }
+}
+
+/**
+ * Locate last brace in `str` within the key.
+ *
+ * @param {String} str
+ * @return {Number}
+ * @api private
+ */
+
+function lastBraceInKey(str) {
+  var len = str.length
+    , brace
+    , c;
+  for (var i = 0; i < len; ++i) {
+    c = str[i];
+    if (']' == c) brace = false;
+    if ('[' == c) brace = true;
+    if ('=' == c && !brace) return i;
+  }
+}
+
+});
+
+require.define("/node_modules/websocket-stream/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/websocket-stream/index.js",function(require,module,exports,__dirname,__filename,process,global){var stream = require('stream')
+var util = require('util')
+
+function WebsocketStream(server, protocol) {
+  var self = this
+  stream.Stream.call(this)
+  this.readable = true
+  this.writable = true
+  if (typeof server === "object") {
+    this.ws = server
+    this.ws.on('message', this.onMessage.bind(this))
+    this.ws.on('error', this.onError.bind(this))
+    this.ws.on('close', this.onClose.bind(this))
+    this.ws.on('open', function() {
+      self.emit('open')
+    })
+  } else {
+    this.ws = new WebSocket(server, protocol)
+    this.ws.onmessage = this.onMessage.bind(this)
+    this.ws.onerror = this.onError.bind(this)
+    this.ws.onclose = this.onClose.bind(this)
+  }
+}
+
+util.inherits(WebsocketStream, stream.Stream)
+
+module.exports = function(server, protocol) {
+  return new WebsocketStream(server, protocol)
+}
+
+module.exports.WebsocketStream = WebsocketStream
+
+WebsocketStream.prototype.onMessage = function(e, flags) {
+  if (e.data) return this.emit('data', e.data, flags)
+  this.emit('data', e, flags)
+}
+
+WebsocketStream.prototype.onError = function(err) {
+  this.emit('error', err)
+}
+
+WebsocketStream.prototype.onClose = function(err) {
+  this.emit('end')
+}
+
+WebsocketStream.prototype.write = function(data, options) {
+  return this.ws.send(data, options)
+}
+
+WebsocketStream.prototype.end = function() {
+  this.ws.close()
+}
+
+});
+
+require.define("stream",function(require,module,exports,__dirname,__filename,process,global){var events = require('events');
+var util = require('util');
+
+function Stream() {
+  events.EventEmitter.call(this);
+}
+util.inherits(Stream, events.EventEmitter);
+module.exports = Stream;
+// Backwards-compat with node 0.4.x
+Stream.Stream = Stream;
+
+Stream.prototype.pipe = function(dest, options) {
+  var source = this;
+
+  function ondata(chunk) {
+    if (dest.writable) {
+      if (false === dest.write(chunk) && source.pause) {
+        source.pause();
+      }
+    }
+  }
+
+  source.on('data', ondata);
+
+  function ondrain() {
+    if (source.readable && source.resume) {
+      source.resume();
+    }
+  }
+
+  dest.on('drain', ondrain);
+
+  // If the 'end' option is not supplied, dest.end() will be called when
+  // source gets the 'end' or 'close' events.  Only dest.end() once, and
+  // only when all sources have ended.
+  if (!dest._isStdio && (!options || options.end !== false)) {
+    dest._pipeCount = dest._pipeCount || 0;
+    dest._pipeCount++;
+
+    source.on('end', onend);
+    source.on('close', onclose);
+  }
+
+  var didOnEnd = false;
+  function onend() {
+    if (didOnEnd) return;
+    didOnEnd = true;
+
+    dest._pipeCount--;
+
+    // remove the listeners
+    cleanup();
+
+    if (dest._pipeCount > 0) {
+      // waiting for other incoming streams to end.
+      return;
+    }
+
+    dest.end();
+  }
+
+
+  function onclose() {
+    if (didOnEnd) return;
+    didOnEnd = true;
+
+    dest._pipeCount--;
+
+    // remove the listeners
+    cleanup();
+
+    if (dest._pipeCount > 0) {
+      // waiting for other incoming streams to end.
+      return;
+    }
+
+    dest.destroy();
+  }
+
+  // don't leave dangling pipes when there are errors.
+  function onerror(er) {
+    cleanup();
+    if (this.listeners('error').length === 0) {
+      throw er; // Unhandled stream error in pipe.
+    }
+  }
+
+  source.on('error', onerror);
+  dest.on('error', onerror);
+
+  // remove all the event listeners that were added.
+  function cleanup() {
+    source.removeListener('data', ondata);
+    dest.removeListener('drain', ondrain);
+
+    source.removeListener('end', onend);
+    source.removeListener('close', onclose);
+
+    source.removeListener('error', onerror);
+    dest.removeListener('error', onerror);
+
+    source.removeListener('end', cleanup);
+    source.removeListener('close', cleanup);
+
+    dest.removeListener('end', cleanup);
+    dest.removeListener('close', cleanup);
+  }
+
+  source.on('end', cleanup);
+  source.on('close', cleanup);
+
+  dest.on('end', cleanup);
+  dest.on('close', cleanup);
+
+  dest.emit('pipe', source);
+
+  // Allow for unix-like usage: A.pipe(B).pipe(C)
+  return dest;
+};
+
+});
+
+require.define("events",function(require,module,exports,__dirname,__filename,process,global){if (!process.EventEmitter) process.EventEmitter = function () {};
+
+var EventEmitter = exports.EventEmitter = process.EventEmitter;
+var isArray = typeof Array.isArray === 'function'
+    ? Array.isArray
+    : function (xs) {
+        return Object.prototype.toString.call(xs) === '[object Array]'
+    }
+;
+function indexOf (xs, x) {
+    if (xs.indexOf) return xs.indexOf(x);
+    for (var i = 0; i < xs.length; i++) {
+        if (x === xs[i]) return i;
+    }
+    return -1;
+}
+
+// By default EventEmitters will print a warning if more than
+// 10 listeners are added to it. This is a useful default which
+// helps finding memory leaks.
+//
+// Obviously not all Emitters should be limited to 10. This function allows
+// that to be increased. Set to zero for unlimited.
+var defaultMaxListeners = 10;
+EventEmitter.prototype.setMaxListeners = function(n) {
+  if (!this._events) this._events = {};
+  this._events.maxListeners = n;
+};
+
+
+EventEmitter.prototype.emit = function(type) {
+  // If there is no 'error' event listener then throw.
+  if (type === 'error') {
+    if (!this._events || !this._events.error ||
+        (isArray(this._events.error) && !this._events.error.length))
+    {
+      if (arguments[1] instanceof Error) {
+        throw arguments[1]; // Unhandled 'error' event
+      } else {
+        throw new Error("Uncaught, unspecified 'error' event.");
+      }
+      return false;
+    }
+  }
+
+  if (!this._events) return false;
+  var handler = this._events[type];
+  if (!handler) return false;
+
+  if (typeof handler == 'function') {
+    switch (arguments.length) {
+      // fast cases
+      case 1:
+        handler.call(this);
+        break;
+      case 2:
+        handler.call(this, arguments[1]);
+        break;
+      case 3:
+        handler.call(this, arguments[1], arguments[2]);
+        break;
+      // slower
+      default:
+        var args = Array.prototype.slice.call(arguments, 1);
+        handler.apply(this, args);
+    }
+    return true;
+
+  } else if (isArray(handler)) {
+    var args = Array.prototype.slice.call(arguments, 1);
+
+    var listeners = handler.slice();
+    for (var i = 0, l = listeners.length; i < l; i++) {
+      listeners[i].apply(this, args);
+    }
+    return true;
+
+  } else {
+    return false;
+  }
+};
+
+// EventEmitter is defined in src/node_events.cc
+// EventEmitter.prototype.emit() is also defined there.
+EventEmitter.prototype.addListener = function(type, listener) {
+  if ('function' !== typeof listener) {
+    throw new Error('addListener only takes instances of Function');
+  }
+
+  if (!this._events) this._events = {};
+
+  // To avoid recursion in the case that type == "newListeners"! Before
+  // adding it to the listeners, first emit "newListeners".
+  this.emit('newListener', type, listener);
+
+  if (!this._events[type]) {
+    // Optimize the case of one listener. Don't need the extra array object.
+    this._events[type] = listener;
+  } else if (isArray(this._events[type])) {
+
+    // Check for listener leak
+    if (!this._events[type].warned) {
+      var m;
+      if (this._events.maxListeners !== undefined) {
+        m = this._events.maxListeners;
+      } else {
+        m = defaultMaxListeners;
+      }
+
+      if (m && m > 0 && this._events[type].length > m) {
+        this._events[type].warned = true;
+        console.error('(node) warning: possible EventEmitter memory ' +
+                      'leak detected. %d listeners added. ' +
+                      'Use emitter.setMaxListeners() to increase limit.',
+                      this._events[type].length);
+        console.trace();
+      }
+    }
+
+    // If we've already got an array, just append.
+    this._events[type].push(listener);
+  } else {
+    // Adding the second element, need to change to array.
+    this._events[type] = [this._events[type], listener];
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.on = EventEmitter.prototype.addListener;
+
+EventEmitter.prototype.once = function(type, listener) {
+  var self = this;
+  self.on(type, function g() {
+    self.removeListener(type, g);
+    listener.apply(this, arguments);
+  });
+
+  return this;
+};
+
+EventEmitter.prototype.removeListener = function(type, listener) {
+  if ('function' !== typeof listener) {
+    throw new Error('removeListener only takes instances of Function');
+  }
+
+  // does not use listeners(), so no side effect of creating _events[type]
+  if (!this._events || !this._events[type]) return this;
+
+  var list = this._events[type];
+
+  if (isArray(list)) {
+    var i = indexOf(list, listener);
+    if (i < 0) return this;
+    list.splice(i, 1);
+    if (list.length == 0)
+      delete this._events[type];
+  } else if (this._events[type] === listener) {
+    delete this._events[type];
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.removeAllListeners = function(type) {
+  // does not use listeners(), so no side effect of creating _events[type]
+  if (type && this._events && this._events[type]) this._events[type] = null;
+  return this;
+};
+
+EventEmitter.prototype.listeners = function(type) {
+  if (!this._events) this._events = {};
+  if (!this._events[type]) this._events[type] = [];
+  if (!isArray(this._events[type])) {
+    this._events[type] = [this._events[type]];
+  }
+  return this._events[type];
+};
+
+});
+
+require.define("util",function(require,module,exports,__dirname,__filename,process,global){var events = require('events');
+
+exports.isArray = isArray;
+exports.isDate = function(obj){return Object.prototype.toString.call(obj) === '[object Date]'};
+exports.isRegExp = function(obj){return Object.prototype.toString.call(obj) === '[object RegExp]'};
+
+
+exports.print = function () {};
+exports.puts = function () {};
+exports.debug = function() {};
+
+exports.inspect = function(obj, showHidden, depth, colors) {
+  var seen = [];
+
+  var stylize = function(str, styleType) {
+    // http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
+    var styles =
+        { 'bold' : [1, 22],
+          'italic' : [3, 23],
+          'underline' : [4, 24],
+          'inverse' : [7, 27],
+          'white' : [37, 39],
+          'grey' : [90, 39],
+          'black' : [30, 39],
+          'blue' : [34, 39],
+          'cyan' : [36, 39],
+          'green' : [32, 39],
+          'magenta' : [35, 39],
+          'red' : [31, 39],
+          'yellow' : [33, 39] };
+
+    var style =
+        { 'special': 'cyan',
+          'number': 'blue',
+          'boolean': 'yellow',
+          'undefined': 'grey',
+          'null': 'bold',
+          'string': 'green',
+          'date': 'magenta',
+          // "name": intentionally not styling
+          'regexp': 'red' }[styleType];
+
+    if (style) {
+      return '\033[' + styles[style][0] + 'm' + str +
+             '\033[' + styles[style][1] + 'm';
+    } else {
+      return str;
+    }
+  };
+  if (! colors) {
+    stylize = function(str, styleType) { return str; };
+  }
+
+  function format(value, recurseTimes) {
+    // Provide a hook for user-specified inspect functions.
+    // Check that value is an object with an inspect function on it
+    if (value && typeof value.inspect === 'function' &&
+        // Filter out the util module, it's inspect function is special
+        value !== exports &&
+        // Also filter out any prototype objects using the circular check.
+        !(value.constructor && value.constructor.prototype === value)) {
+      return value.inspect(recurseTimes);
+    }
+
+    // Primitive types cannot have properties
+    switch (typeof value) {
+      case 'undefined':
+        return stylize('undefined', 'undefined');
+
+      case 'string':
+        var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
+                                                 .replace(/'/g, "\\'")
+                                                 .replace(/\\"/g, '"') + '\'';
+        return stylize(simple, 'string');
+
+      case 'number':
+        return stylize('' + value, 'number');
+
+      case 'boolean':
+        return stylize('' + value, 'boolean');
+    }
+    // For some reason typeof null is "object", so special case here.
+    if (value === null) {
+      return stylize('null', 'null');
+    }
+
+    // Look up the keys of the object.
+    var visible_keys = Object_keys(value);
+    var keys = showHidden ? Object_getOwnPropertyNames(value) : visible_keys;
+
+    // Functions without properties can be shortcutted.
+    if (typeof value === 'function' && keys.length === 0) {
+      if (isRegExp(value)) {
+        return stylize('' + value, 'regexp');
+      } else {
+        var name = value.name ? ': ' + value.name : '';
+        return stylize('[Function' + name + ']', 'special');
+      }
+    }
+
+    // Dates without properties can be shortcutted
+    if (isDate(value) && keys.length === 0) {
+      return stylize(value.toUTCString(), 'date');
+    }
+
+    var base, type, braces;
+    // Determine the object type
+    if (isArray(value)) {
+      type = 'Array';
+      braces = ['[', ']'];
+    } else {
+      type = 'Object';
+      braces = ['{', '}'];
+    }
+
+    // Make functions say that they are functions
+    if (typeof value === 'function') {
+      var n = value.name ? ': ' + value.name : '';
+      base = (isRegExp(value)) ? ' ' + value : ' [Function' + n + ']';
+    } else {
+      base = '';
+    }
+
+    // Make dates with properties first say the date
+    if (isDate(value)) {
+      base = ' ' + value.toUTCString();
+    }
+
+    if (keys.length === 0) {
+      return braces[0] + base + braces[1];
+    }
+
+    if (recurseTimes < 0) {
+      if (isRegExp(value)) {
+        return stylize('' + value, 'regexp');
+      } else {
+        return stylize('[Object]', 'special');
+      }
+    }
+
+    seen.push(value);
+
+    var output = keys.map(function(key) {
+      var name, str;
+      if (value.__lookupGetter__) {
+        if (value.__lookupGetter__(key)) {
+          if (value.__lookupSetter__(key)) {
+            str = stylize('[Getter/Setter]', 'special');
+          } else {
+            str = stylize('[Getter]', 'special');
+          }
+        } else {
+          if (value.__lookupSetter__(key)) {
+            str = stylize('[Setter]', 'special');
+          }
+        }
+      }
+      if (visible_keys.indexOf(key) < 0) {
+        name = '[' + key + ']';
+      }
+      if (!str) {
+        if (seen.indexOf(value[key]) < 0) {
+          if (recurseTimes === null) {
+            str = format(value[key]);
+          } else {
+            str = format(value[key], recurseTimes - 1);
+          }
+          if (str.indexOf('\n') > -1) {
+            if (isArray(value)) {
+              str = str.split('\n').map(function(line) {
+                return '  ' + line;
+              }).join('\n').substr(2);
+            } else {
+              str = '\n' + str.split('\n').map(function(line) {
+                return '   ' + line;
+              }).join('\n');
+            }
+          }
+        } else {
+          str = stylize('[Circular]', 'special');
+        }
+      }
+      if (typeof name === 'undefined') {
+        if (type === 'Array' && key.match(/^\d+$/)) {
+          return str;
+        }
+        name = JSON.stringify('' + key);
+        if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
+          name = name.substr(1, name.length - 2);
+          name = stylize(name, 'name');
+        } else {
+          name = name.replace(/'/g, "\\'")
+                     .replace(/\\"/g, '"')
+                     .replace(/(^"|"$)/g, "'");
+          name = stylize(name, 'string');
+        }
+      }
+
+      return name + ': ' + str;
+    });
+
+    seen.pop();
+
+    var numLinesEst = 0;
+    var length = output.reduce(function(prev, cur) {
+      numLinesEst++;
+      if (cur.indexOf('\n') >= 0) numLinesEst++;
+      return prev + cur.length + 1;
+    }, 0);
+
+    if (length > 50) {
+      output = braces[0] +
+               (base === '' ? '' : base + '\n ') +
+               ' ' +
+               output.join(',\n  ') +
+               ' ' +
+               braces[1];
+
+    } else {
+      output = braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
+    }
+
+    return output;
+  }
+  return format(obj, (typeof depth === 'undefined' ? 2 : depth));
+};
+
+
+function isArray(ar) {
+  return ar instanceof Array ||
+         Array.isArray(ar) ||
+         (ar && ar !== Object.prototype && isArray(ar.__proto__));
+}
+
+
+function isRegExp(re) {
+  return re instanceof RegExp ||
+    (typeof re === 'object' && Object.prototype.toString.call(re) === '[object RegExp]');
+}
+
+
+function isDate(d) {
+  if (d instanceof Date) return true;
+  if (typeof d !== 'object') return false;
+  var properties = Date.prototype && Object_getOwnPropertyNames(Date.prototype);
+  var proto = d.__proto__ && Object_getOwnPropertyNames(d.__proto__);
+  return JSON.stringify(proto) === JSON.stringify(properties);
+}
+
+function pad(n) {
+  return n < 10 ? '0' + n.toString(10) : n.toString(10);
+}
+
+var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
+              'Oct', 'Nov', 'Dec'];
+
+// 26 Feb 16:19:34
+function timestamp() {
+  var d = new Date();
+  var time = [pad(d.getHours()),
+              pad(d.getMinutes()),
+              pad(d.getSeconds())].join(':');
+  return [d.getDate(), months[d.getMonth()], time].join(' ');
+}
+
+exports.log = function (msg) {};
+
+exports.pump = null;
+
+var Object_keys = Object.keys || function (obj) {
+    var res = [];
+    for (var key in obj) res.push(key);
+    return res;
+};
+
+var Object_getOwnPropertyNames = Object.getOwnPropertyNames || function (obj) {
+    var res = [];
+    for (var key in obj) {
+        if (Object.hasOwnProperty.call(obj, key)) res.push(key);
+    }
+    return res;
+};
+
+var Object_create = Object.create || function (prototype, properties) {
+    // from es5-shim
+    var object;
+    if (prototype === null) {
+        object = { '__proto__' : null };
+    }
+    else {
+        if (typeof prototype !== 'object') {
+            throw new TypeError(
+                'typeof prototype[' + (typeof prototype) + '] != \'object\''
+            );
+        }
+        var Type = function () {};
+        Type.prototype = prototype;
+        object = new Type();
+        object.__proto__ = prototype;
+    }
+    if (typeof properties !== 'undefined' && Object.defineProperties) {
+        Object.defineProperties(object, properties);
+    }
+    return object;
+};
+
+exports.inherits = function(ctor, superCtor) {
+  ctor.super_ = superCtor;
+  ctor.prototype = Object_create(superCtor.prototype, {
+    constructor: {
+      value: ctor,
+      enumerable: false,
+      writable: true,
+      configurable: true
+    }
+  });
+};
+
+var formatRegExp = /%[sdj%]/g;
+exports.format = function(f) {
+  if (typeof f !== 'string') {
+    var objects = [];
+    for (var i = 0; i < arguments.length; i++) {
+      objects.push(exports.inspect(arguments[i]));
+    }
+    return objects.join(' ');
+  }
+
+  var i = 1;
+  var args = arguments;
+  var len = args.length;
+  var str = String(f).replace(formatRegExp, function(x) {
+    if (x === '%') return '%';
+    if (i >= len) return x;
+    switch (x) {
+      case '%s': return String(args[i++]);
+      case '%d': return Number(args[i++]);
+      case '%j': return JSON.stringify(args[i++]);
+      default:
+        return x;
+    }
+  });
+  for(var x = args[i]; i < len; x = args[++i]){
+    if (x === null || typeof x !== 'object') {
+      str += ' ' + x;
+    } else {
+      str += ' ' + exports.inspect(x);
+    }
+  }
+  return str;
+};
+
+});
+
+require.define("/node_modules/mux-demux/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/mux-demux/index.js",function(require,module,exports,__dirname,__filename,process,global){'use strict';
+
+var through = require('through')
+  , extend = require('xtend')
+  , duplex = require('duplex')
+  , serializer = require('stream-serializer')
+
+function MuxDemux (opts, onConnection) {
+  if('function' === typeof opts)
+    onConnection = opts, opts = null
+  opts = opts || {}
+
+  function createID() {
+    return (
+      Math.random().toString(16).slice(2) +
+      Math.random().toString(16).slice(2)
+    )
+  }
+
+  var streams = {}, streamCount = 0
+  var md = duplex().resume()
+
+  md.on('_data', function (data) {
+    var id = data.shift()
+    var event = data[0]
+    var s = streams[id]
+    if(!s) {
+      if(event == 'close')
+        return
+      if(event != 'new')
+        return outer.emit('unknown', id)
+      md.emit('connection', createStream(id, data[1].meta, data[1].opts))
+    }
+    else if (event === 'pause')
+      s.paused = true
+    else if (event === 'resume') {
+      var p = s.paused
+      s.paused = false
+      if(p) s.emit('drain')
+    }
+    else if (event === 'error') {
+      var error = data[1]
+      if (typeof error === 'string') {
+        s.emit('error', new Error(error))
+      } else if (typeof error.message === 'string') {
+        var e = new Error(error.message)
+        extend(e, error)
+        s.emit('error', e)
+      } else {
+        s.emit('error', error)
+      }
+    }
+    else {
+      s.emit.apply(s, data)
+    }
+  })
+
+  function destroyAll (_err) {
+    md.removeListener('end', destroyAll)
+    md.removeListener('error', destroyAll)
+    md.removeListener('close', destroyAll)
+    var err = _err || new Error ('unexpected disconnection')
+    for (var i in streams) {
+      var s = streams[i]
+      s.destroyed = true
+      if (opts.error !== true) {
+        s.end()
+      } else {
+        s.emit('error', err)
+        s.destroy()
+      }
+    }
+  }
+
+  //end the stream once sub-streams have ended.
+  //(waits for them to close, like on a tcp server)
+
+  function createStream(id, meta, opts) {
+    streamCount ++
+    var s = through(function (data) {
+      if(!this.writable) {
+        var err = Error('stream is not writable: ' + id)
+        err.stream = this
+        return outer.emit("error", err)
+      }
+
+      md._data([s.id, 'data', data])
+    }, function () {
+      md._data([s.id, 'end'])
+      if (this.readable && !opts.allowHalfOpen && !this.ended) {
+        this.emit("end")
+      }
+    })
+    s.pause = function () {
+      md._data([s.id, 'pause'])
+    }
+    s.resume = function () {
+      md._data([s.id, 'resume'])
+    }
+    s.error = function (message) {
+      md._data([s.id, 'error', message])
+    }
+    s.once('close', function () {
+      delete streams[id]
+      streamCount --
+      md._data([s.id, 'close'])
+      if(streamCount === 0)
+        md.emit('zero')
+    })
+    s.writable = opts.writable
+    s.readable = opts.readable
+    streams[s.id = id] = s
+    s.meta = meta
+    return s
+  }
+
+  var outer = serializer(opts.wrapper)(md)
+
+  if(md !== outer)
+    md.on('connection', function (stream) {
+      outer.emit('connection', stream)
+    })
+
+  outer.close = function (cb) {
+    md.once('zero', function () {
+      md._end()
+      if(cb) cb()
+    })
+    return this
+  }
+
+  if(onConnection)
+    outer.on('connection', onConnection)
+
+  outer.on('connection', function (stream) {
+    //if mux-demux recieves a stream but there is nothing to handle it,
+    //then return an error to the other side.
+    //still trying to think of the best error message.
+    if(outer.listeners('connection').length === 1)
+      stream.error('remote end lacks connection listener')
+  })
+
+  var pipe = outer.pipe
+  outer.pipe = function (dest, opts) {
+    pipe.call(outer, dest, opts)
+    md.on('end', destroyAll)
+    md.on('close', destroyAll)
+    md.on('error', destroyAll)
+    return dest
+  }
+
+  outer.createStream = function (meta, opts) {
+    opts = opts || {}
+    if (!opts.writable && !opts.readable)
+      opts.readable = opts.writable = true
+    var s = createStream(createID(), meta, opts)
+    var _opts = {writable: opts.readable, readable: opts.writable}
+    md._data([s.id, 'new', {meta: meta, opts: _opts}])
+    return s
+  }
+  outer.createWriteStream = function (meta) {
+    return outer.createStream(meta, {writable: true, readable: false})
+  }
+  outer.createReadStream = function (meta) {
+    return outer.createStream(meta, {writable: false, readable: true})
+  }
+
+  return outer
+}
+
+module.exports = MuxDemux
+
+
+});
+
+require.define("/node_modules/mux-demux/node_modules/through/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+});
+
+require.define("/node_modules/mux-demux/node_modules/through/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
+
+// through
+//
+// a stream that does nothing but re-emit the input.
+// useful for aggregating a series of changing but not ending streams into one stream)
+
+
+
+exports = module.exports = through
+through.through = through
+
+//create a readable writable stream.
+
+function through (write, end) {
+  write = write || function (data) { this.emit('data', data) }
+  end = end || function () { this.emit('end') }
+
+  var ended = false, destroyed = false
+  var stream = new Stream(), buffer = []
+  stream.buffer = buffer
+  stream.readable = stream.writable = true
+  stream.paused = false
+  stream.write = function (data) {
+    write.call(this, data)
+    return !stream.paused
+  }
+
+  function drain() {
+    while(buffer.length && !stream.paused) {
+      var data = buffer.shift()
+      if(null === data)
+        return stream.emit('end')
+      else
+        stream.emit('data', data)
+    }
+  }
+
+  stream.queue = function (data) {
+    buffer.push(data)
+    drain()
+  }
+
+  //this will be registered as the first 'end' listener
+  //must call destroy next tick, to make sure we're after any
+  //stream piped from here.
+  //this is only a problem if end is not emitted synchronously.
+  //a nicer way to do this is to make sure this is the last listener for 'end'
+
+  stream.on('end', function () {
+    stream.readable = false
+    if(!stream.writable)
+      process.nextTick(function () {
+        stream.destroy()
+      })
+  })
+
+  function _end () {
+    stream.writable = false
+    end.call(stream)
+    if(!stream.readable)
+      stream.destroy()
+  }
+
+  stream.end = function (data) {
+    if(ended) return
+    ended = true
+    if(arguments.length) stream.write(data)
+    _end() // will emit or queue
+  }
+
+  stream.destroy = function () {
+    if(destroyed) return
+    destroyed = true
+    ended = true
+    buffer.length = 0
+    stream.writable = stream.readable = false
+    stream.emit('close')
+  }
+
+  stream.pause = function () {
+    if(stream.paused) return
+    stream.paused = true
+    stream.emit('pause')
+  }
+  stream.resume = function () {
+    if(stream.paused) {
+      stream.paused = false
+    }
+    drain()
+    //may have become paused again,
+    //as drain emits 'data'.
+    if(!stream.paused)
+      stream.emit('drain')
+  }
+  return stream
+}
+
+
+});
+
+require.define("/node_modules/mux-demux/node_modules/xtend/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index"}
+});
+
+require.define("/node_modules/mux-demux/node_modules/xtend/index.js",function(require,module,exports,__dirname,__filename,process,global){module.exports = extend
+
+function extend(target) {
+    for (var i = 1; i < arguments.length; i++) {
+        var source = arguments[i],
+            keys = Object.keys(source)
+
+        for (var j = 0; j < keys.length; j++) {
+            var name = keys[j]
+            target[name] = source[name]
+        }
+    }
+
+    return target
+}
+});
+
+require.define("/node_modules/mux-demux/node_modules/duplex/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/mux-demux/node_modules/duplex/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
+
+module.exports = function (write, end) {
+  var stream = new Stream() 
+  var buffer = [], ended = false, destroyed = false, emitEnd
+  stream.writable = stream.readable = true
+  stream.paused = false
+  stream._paused = false
+  stream.buffer = buffer
+  
+  stream
+    .on('pause', function () {
+      stream._paused = true
+    })
+    .on('drain', function () {
+      stream._paused = false
+    })
+   
+  function destroySoon () {
+    process.nextTick(stream.destroy.bind(stream))
+  }
+
+  if(write)
+    stream.on('_data', write)
+  if(end)
+    stream.on('_end', end)
+
+  //destroy the stream once both ends are over
+  //but do it in nextTick, so that other listeners
+  //on end have time to respond
+  stream.once('end', function () { 
+    stream.readable = false
+    if(!stream.writable) {
+      process.nextTick(function () {
+        stream.destroy()
+      })
+    }
+  })
+
+  stream.once('_end', function () { 
+    stream.writable = false
+    if(!stream.readable)
+      stream.destroy()
+  })
+
+  // this is the default write method,
+  // if you overide it, you are resposible
+  // for pause state.
+
+  
+  stream._data = function (data) {
+    if(!stream.paused && !buffer.length)
+      stream.emit('data', data)
+    else 
+      buffer.push(data)
+    return !(stream.paused || buffer.length)
+  }
+
+  stream._end = function (data) { 
+    if(data) stream._data(data)
+    if(emitEnd) return
+    emitEnd = true
+    //destroy is handled above.
+    stream.drain()
+  }
+
+  stream.write = function (data) {
+    stream.emit('_data', data)
+    return !stream._paused
+  }
+
+  stream.end = function () {
+    stream.writable = false
+    if(stream.ended) return
+    stream.ended = true
+    stream.emit('_end')
+  }
+
+  stream.drain = function () {
+    if(!buffer.length && !emitEnd) return
+    //if the stream is paused after just before emitEnd()
+    //end should be buffered.
+    while(!stream.paused) {
+      if(buffer.length) {
+        stream.emit('data', buffer.shift())
+        if(buffer.length == 0) {
+          stream.emit('_drain')
+        }
+      }
+      else if(emitEnd && stream.readable) {
+        stream.readable = false
+        stream.emit('end')
+        return
+      } else {
+        //if the buffer has emptied. emit drain.
+        return true
+      }
+    }
+  }
+  var started = false
+  stream.resume = function () {
+    //this is where I need pauseRead, and pauseWrite.
+    //here the reading side is unpaused,
+    //but the writing side may still be paused.
+    //the whole buffer might not empity at once.
+    //it might pause again.
+    //the stream should never emit data inbetween pause()...resume()
+    //and write should return !buffer.length
+    started = true
+    stream.paused = false
+    stream.drain() //will emit drain if buffer empties.
+    return stream
+  }
+
+  stream.destroy = function () {
+    if(destroyed) return
+    destroyed = ended = true     
+    buffer.length = 0
+    stream.emit('close')
+  }
+  var pauseCalled = false
+  stream.pause = function () {
+    started = true
+    stream.paused = true
+    stream.emit('_pause')
+    return stream
+  }
+  stream._pause = function () {
+    if(!stream._paused) {
+      stream._paused = true
+      stream.emit('pause')
+    }
+    return this
+  }
+  stream.paused = true
+  process.nextTick(function () {
+    //unless the user manually paused
+    if(started) return
+    stream.resume()
+  })
+ 
+  return stream
+}
+
+
+});
+
+require.define("/node_modules/mux-demux/node_modules/stream-serializer/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/mux-demux/node_modules/stream-serializer/index.js",function(require,module,exports,__dirname,__filename,process,global){
+var EventEmitter = require('events').EventEmitter
+
+exports = module.exports = function (wrapper) {
+
+  if('function' == typeof wrapper)
+    return wrapper
+  
+  return exports[wrapper] || exports.json
+}
+
+exports.json = function (stream) {
+
+  var write = stream.write
+  var soFar = ''
+
+  function parse (line) {
+    var js
+    try {
+      js = JSON.parse(line)
+      //ignore lines of whitespace...
+    } catch (err) { 
+      return console.error('invalid JSON', line)
+    }
+    if(js !== undefined)
+      write.call(stream, js)
+  }
+
+  function onData (data) {
+    var lines = (soFar + data).split('\n')
+    soFar = lines.pop()
+    while(lines.length) {
+      parse(lines.shift())
+    }
+  }
+
+  stream.write = onData
+  
+  var end = stream.end
+
+  stream.end = function (data) {
+    if(data)
+      stream.write(data)
+    //if there is any left over...
+    if(soFar) {
+      parse(soFar)
+    }
+    return end.call(stream)
+  }
+
+  stream.emit = function (event, data) {
+
+    if(event == 'data') {
+      data = JSON.stringify(data) + '\n'
+    }
+    //since all stream events only use one argument, this is okay...
+    EventEmitter.prototype.emit.call(stream, event, data)
+  }
+
+  return stream
+//  return es.pipeline(es.split(), es.parse(), stream, es.stringify())
+}
+
+exports.raw = function (stream) {
+  return stream
+}
+
+
+});
+
+require.define("/node_modules/scuttlebutt/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/scuttlebutt/model.js",function(require,module,exports,__dirname,__filename,process,global){var Scuttlebutt = require('./index')
+var inherits = require('util').inherits
+var each = require('iterate').each
+var u = require('./util')
+
+module.exports = Model
+
+inherits(Model, Scuttlebutt)
+
+function Model (opts) {
+  if(!(this instanceof Model)) return new Model(opts)
+  Scuttlebutt.call(this, opts)
+  this.store = {}
+}
+
+var m = Model.prototype
+
+m.set = function (k, v) {
+  this.localUpdate([k, v])
+  return this
+}
+
+m.get = function (k) {
+  if(this.store[k])
+    return this.store[k][0][1]
+}
+
+//return this history since sources.
+//sources is a hash of { ID: TIMESTAMP }
+
+m.applyUpdate = function (update) {
+  var key = update[0][0]
+  //ignore if we already have a more recent value
+  if('undefined' !== typeof this.store[key]
+    && this.store[key][1] > update[1])
+    return this.emit('_remove', update)
+
+  if(this.store[key]) this.emit('_remove', this.store[key])
+
+  this.store[key] = update
+  this.emit.apply(this, ['update'].concat(update))
+  this.emit('change', key, update[0][1])
+  this.emit('change:'+key, update[0][1])
+
+  return true
+}
+
+m.history = function (sources) {
+  var self = this
+  var h = []
+  each(this.store, function (e) {
+    if(u.filter(e, sources))
+      h.push(e)
+  })
+  return h
+}
+
+m.toJSON = function () {
+  var o = {}
+  for (var k in this.store)
+    o[k] = this.get(k)
+  return o
+}
+
+});
+
+require.define("/node_modules/scuttlebutt/index.js",function(require,module,exports,__dirname,__filename,process,global){var EventEmitter = require('events').EventEmitter
+var i = require('iterate')
+var duplex = require('duplex')
+var inherits = require('util').inherits
+var serializer = require('stream-serializer')
+var u = require('./util')
+var timestamp = require('monotonic-timestamp')
+
+exports = 
+module.exports = Scuttlebutt
+
+exports.createID = u.createID
+exports.updateIsRecent = u.filter
+exports.filter = u.filter
+exports.timestamp = timestamp
+
+function dutyOfSubclass() {
+  throw new Error('method must be implemented by subclass')
+}
+
+function validate (data) {
+  var ts = data[1], source = data[2]
+
+  if(  !Array.isArray(data) 
+    || 'string'    !== typeof source
+    || 'number'    !== typeof ts
+  ) return false
+
+  return true
+}
+
+var emit = EventEmitter.prototype.emit
+
+inherits (Scuttlebutt, EventEmitter)
+
+function Scuttlebutt (opts) {
+
+  if(!(this instanceof Scuttlebutt)) return new Scuttlebutt(opts)
+  var id = 'string' === typeof opts ? opts : opts && opts.id
+  this.sources = {}
+  this.setMaxListeners(Number.MAX_VALUE)
+  //count how many other instances we are replicating to.
+  this._streams = 0
+  if(opts && opts.sign && opts.verify) {
+    this.id      = opts.id || opts.createId()
+    this._sign   = opts.sign
+    this._verify = opts.verify
+  } else {
+    this.id = id || u.createId()
+  }
+}
+
+var sb = Scuttlebutt.prototype
+
+var emit = EventEmitter.prototype.emit
+
+sb.applyUpdate = dutyOfSubclass
+sb.history      = dutyOfSubclass
+
+sb.localUpdate = function (trx) {
+  this._update([trx, timestamp(), this.id])
+  return this
+}
+
+sb._update = function (update) {
+  var ts = update[1]
+  var source = update[2]
+  //if this message is old for it's source,
+  //ignore it. it's out of order.
+  //each node must emit it's changes in order!
+  
+  var latest = this.sources[source]
+  if(latest && latest >= ts)
+    return emit.call(this, 'old_data', update), false
+
+  this.sources[source] = ts
+
+  var self = this
+  function didVerification (err, verified) {
+
+    // I'm not sure how what should happen if a async verification
+    // errors. if it's an key not found - that is a verification fail,
+    // not a error. if it's genunie error, really you should queue and 
+    // try again? or replay the message later
+    // -- this should be done my the security plugin though, not scuttlebutt.
+
+    if(err)
+      return emit.call(self, 'error', err)
+
+    if(!verified)
+      return emit.call(self, 'unverified_data', update)
+
+    // check if this message is older than
+    // the value we already have.
+    // do nothing if so
+    // emit an 'old_data' event because i'll want to track how many
+    // unnecessary messages are sent.
+
+    if(self.applyUpdate(update))
+      emit.call(self, '_update', update) //write to stream.
+
+  }
+
+  if(source !== this.id) {
+    if(this._verify)
+      this._verify(update, didVerification)
+    else
+      didVerification(null, true)
+  } else {
+    if(this._sign) {
+      //could make this async easily enough.
+      update[3] = this._sign(update)
+    }
+    didVerification(null, true)
+  }
+
+  return true
+}
+
+sb.createStream = function (opts) {
+  var self = this
+  //the sources for the remote end.
+  var sources = {}, other
+  var syncSent = false, syncRecv = false
+
+  this._streams ++
+
+  opts = opts || {}
+  var d = duplex()
+  d.name = opts.name
+  var outer = serializer(opts && opts.wrapper)(d)
+  outer.inner = d
+
+  d.writable = opts.writable !== false
+  d.readable = opts.readable !== false
+
+  syncRecv   = !d.writable
+  syncSent   = !d.readable
+
+  var tail = opts.tail !== false //default to tail=true
+
+  function start (data) {
+    //when the digest is recieved from the other end,
+    //send the history.
+    //merge with the current list of sources.
+    sources = data.clock
+    i.each(self.history(sources), function (data) {d._data(data)})
+    
+    outer.emit('header', data)
+    d._data('SYNC')
+    //when we have sent all history
+    outer.emit('syncSent')
+    syncSent = true
+    //when we have recieved all histoyr
+    //emit 'synced' when this stream has synced.
+    if(syncRecv) outer.emit('sync'), outer.emit('synced')
+    if(!tail) d._end()
+  }
+
+  d
+    .on('_data', function (data) {
+      //if it's an array, it's an update.
+      if(Array.isArray(data)) {
+        if(validate(data))
+          return self._update(data)
+      }
+      //if it's an object, it's a scuttlebut digest.
+      else if('object' === typeof data && data)
+        start(data)
+      else if('string' === typeof data && data == 'SYNC') {
+        syncRecv = true
+        outer.emit('syncRecieved')
+        if(syncSent) outer.emit('sync'), outer.emit('synced')
+      }
+    }).on('_end', function () {
+      d._end()
+    })
+    .on('close', function () {
+      self.removeListener('_update', onUpdate)
+      //emit the number of streams that are remaining...
+      //this will be used for memory management...
+      self._streams --
+      emit.call(self, 'unstream', self._streams)
+    })
+
+  if(opts && opts.tail === false) {
+    outer.on('sync', function () {
+      process.nextTick(function () {
+        d._end()
+      })
+    })
+  }
+  function onUpdate (update) { //key, value, source, ts
+    if(!u.filter(update, sources))
+      return
+
+    d._data(update)
+
+    //really, this should happen before emitting.
+    var ts = update[1]
+    var source = update[2]
+    sources[source] = ts
+  }
+
+  var outgoing = { id : self.id, clock : self.sources }
+
+  if (opts && opts.meta) outgoing.meta = opts.meta
+
+  if(d.readable) {
+    d._data(outgoing)
+    if(!d.writable)
+      start({clock:{}})
+    if(tail)
+      self.on('_update', onUpdate)
+  }
+
+  self.once('dispose', function () {
+    d.end()
+  })
+
+  return outer
+}
+
+sb.createWriteStream = function (opts) {
+  opts = opts || {}
+  opts.writable = true; opts.readable = false
+  return this.createStream(opts)
+}
+
+sb.createReadStream = function (opts) {
+  opts = opts || {}
+  opts.writable = false; opts.readable = true
+  return this.createStream(opts)
+}
+
+sb.dispose = function () {
+  emit.call(this, 'dispose')
+}
+
+sb.setId = function (id) {
+  this.id = id
+  return this
+}
+
+//create another instance of this scuttlebutt,
+//that is in sync and attached to this instance.
+sb.clone = function () {
+  var A = this
+  var B = new (A.constructor)
+  B.setId(A.id) //same id. think this will work...
+
+  var a = A.createStream({wrapper: 'raw'})
+  var b = B.createStream({wrapper: 'raw'})
+
+  //all updates must be sync, so make sure pause never happens.
+  a.pause = b.pause = function noop(){}
+
+  a.pipe(b).pipe(a)
+  //resume both streams, so that the new instance is brought up to date immediately.
+  a.resume()
+  b.resume()
+
+  return B
+}
+
+});
+
+require.define("/node_modules/scuttlebutt/node_modules/iterate/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+});
+
+require.define("/node_modules/scuttlebutt/node_modules/iterate/index.js",function(require,module,exports,__dirname,__filename,process,global){
+//
+// adds all the fields from obj2 onto obj1
+//
+
+var each = exports.each = function (obj,iterator){
+ var keys = Object.keys(obj)
+ keys.forEach(function (key){
+  iterator(obj[key],key,obj) 
+ })
+}
+
+var RX = /sadf/.constructor
+function rx (iterator ){
+  return iterator instanceof RX ? function (str) { 
+      var m = iterator.exec(str)
+      return m && (m[1] ? m[1] : m[0]) 
+    } : iterator
+}
+
+var times = exports.times = function () {
+  var args = [].slice.call(arguments)
+    , iterator = rx(args.pop())
+    , m = args.pop()
+    , i = args.shift()
+    , j = args.shift()
+    , diff, dir
+    , a = []
+    
+    i = 'number' === typeof i ? i : 1
+    diff = j ? j - i : 1
+    dir = i < m
+    if(m == i)
+      throw new Error('steps cannot be the same: '+m+', '+i)
+  for (; dir ? i <= m : m <= i; i += diff)
+    a.push(iterator(i))
+  return a
+}
+
+var map = exports.map = function (obj, iterator){
+  iterator = rx(iterator)
+  if(Array.isArray(obj))
+    return obj.map(iterator)
+  if('number' === typeof obj)
+    return times.apply(null, [].slice.call(arguments))  
+  //return if null ?  
+  var keys = Object.keys(obj)
+    , r = {}
+  keys.forEach(function (key){
+    r[key] = iterator(obj[key],key,obj) 
+  })
+  return r
+}
+
+var findReturn = exports.findReturn = function (obj, iterator) {
+  iterator = rx(iterator)
+  if(obj == null)
+    return
+  var keys = Object.keys(obj)
+    , l = keys.length
+  for (var i = 0; i < l; i ++) {
+    var key = keys[i]
+      , value = obj[key]
+    var r = iterator(value, key)
+    if(r) return r
+  }
+}
+
+var find = exports.find = function (obj, iterator) { 
+  iterator = rx(iterator)
+  return findReturn (obj, function (v, k) {
+    var r = iterator(v, k)
+    if(r) return v
+  })
+}
+
+var findKey = exports.findKey = function (obj, iterator) { 
+  iterator = rx(iterator)
+  return findReturn (obj, function (v, k) {
+    var r = iterator(v, k)
+    if(r) return k
+  })
+}
+
+var filter = exports.filter = function (obj, iterator){
+  iterator = rx (iterator)
+
+  if(Array.isArray(obj))
+    return obj.filter(iterator)
+  
+  var keys = Object.keys(obj)
+    , r = {}
+  keys.forEach(function (key){
+    var v
+    if(iterator(v = obj[key],key,obj))
+      r[key] = v
+  })
+  return r 
+}
+
+var mapKeys = exports.mapKeys = function (ary, iterator){
+  var r = {}
+  iterator = rx(iterator)
+  each(ary, function (v,k){
+    r[v] = iterator(v,k)
+  })
+  return r
+}
+
+
+var mapToArray = exports.mapToArray = function (ary, iterator){
+  var r = []
+  iterator = rx(iterator)
+  each(ary, function (v,k){
+    r.push(iterator(v,k))
+  })
+  return r
+}
+
+var path = exports.path = function (object, path) {
+
+  for (var i in path) {
+    if(object == null) return undefined
+    var key = path[i]
+    object = object[key]
+  }
+  return object
+}
+
+/*
+NOTE: naive implementation. 
+`match` must not contain circular references.
+*/
+
+var setPath = exports.setPath = function (object, path, value) {
+
+  for (var i in path) {
+    var key = path[i]
+    if(object[key] == null) object[key] = ( 
+      i + 1 == path.length ? value : {}
+    )
+    object = object[key]
+  }
+}
+
+
+});
+
+require.define("/node_modules/scuttlebutt/node_modules/duplex/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/scuttlebutt/node_modules/duplex/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
+
+module.exports = function (write, end) {
+  var stream = new Stream() 
+  var buffer = [], ended = false, destroyed = false, emitEnd
+  stream.writable = stream.readable = true
+  stream.paused = false
+  stream._paused = false
+  stream.buffer = buffer
+  
+  stream
+    .on('pause', function () {
+      stream._paused = true
+    })
+    .on('drain', function () {
+      stream._paused = false
+    })
+   
+  function destroySoon () {
+    process.nextTick(stream.destroy.bind(stream))
+  }
+
+  if(write)
+    stream.on('_data', write)
+  if(end)
+    stream.on('_end', end)
+
+  //destroy the stream once both ends are over
+  //but do it in nextTick, so that other listeners
+  //on end have time to respond
+  stream.once('end', function () { 
+    stream.readable = false
+    if(!stream.writable) {
+      process.nextTick(function () {
+        stream.destroy()
+      })
+    }
+  })
+
+  stream.once('_end', function () { 
+    stream.writable = false
+    if(!stream.readable)
+      stream.destroy()
+  })
+
+  // this is the default write method,
+  // if you overide it, you are resposible
+  // for pause state.
+
+  
+  stream._data = function (data) {
+    if(!stream.paused && !buffer.length)
+      stream.emit('data', data)
+    else 
+      buffer.push(data)
+    return !(stream.paused || buffer.length)
+  }
+
+  stream._end = function (data) { 
+    if(data) stream._data(data)
+    if(emitEnd) return
+    emitEnd = true
+    //destroy is handled above.
+    stream.drain()
+  }
+
+  stream.write = function (data) {
+    stream.emit('_data', data)
+    return !stream._paused
+  }
+
+  stream.end = function () {
+    stream.writable = false
+    if(stream.ended) return
+    stream.ended = true
+    stream.emit('_end')
+  }
+
+  stream.drain = function () {
+    if(!buffer.length && !emitEnd) return
+    //if the stream is paused after just before emitEnd()
+    //end should be buffered.
+    while(!stream.paused) {
+      if(buffer.length) {
+        stream.emit('data', buffer.shift())
+        if(buffer.length == 0) {
+          stream.emit('_drain')
+        }
+      }
+      else if(emitEnd && stream.readable) {
+        stream.readable = false
+        stream.emit('end')
+        return
+      } else {
+        //if the buffer has emptied. emit drain.
+        return true
+      }
+    }
+  }
+  var started = false
+  stream.resume = function () {
+    //this is where I need pauseRead, and pauseWrite.
+    //here the reading side is unpaused,
+    //but the writing side may still be paused.
+    //the whole buffer might not empity at once.
+    //it might pause again.
+    //the stream should never emit data inbetween pause()...resume()
+    //and write should return !buffer.length
+    started = true
+    stream.paused = false
+    stream.drain() //will emit drain if buffer empties.
+    return stream
+  }
+
+  stream.destroy = function () {
+    if(destroyed) return
+    destroyed = ended = true     
+    buffer.length = 0
+    stream.emit('close')
+  }
+  var pauseCalled = false
+  stream.pause = function () {
+    started = true
+    stream.paused = true
+    stream.emit('_pause')
+    return stream
+  }
+  stream._pause = function () {
+    if(!stream._paused) {
+      stream._paused = true
+      stream.emit('pause')
+    }
+    return this
+  }
+  stream.paused = true
+  process.nextTick(function () {
+    //unless the user manually paused
+    if(started) return
+    stream.resume()
+  })
+ 
+  return stream
+}
+
+
+});
+
+require.define("/node_modules/scuttlebutt/node_modules/stream-serializer/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/scuttlebutt/node_modules/stream-serializer/index.js",function(require,module,exports,__dirname,__filename,process,global){
+var EventEmitter = require('events').EventEmitter
+
+exports = module.exports = function (wrapper) {
+
+  if('function' == typeof wrapper)
+    return wrapper
+  
+  return exports[wrapper] || exports.json
+}
+
+exports.json = function (stream) {
+
+  var write = stream.write
+  var soFar = ''
+
+  function parse (line) {
+    var js
+    try {
+      js = JSON.parse(line)
+      //ignore lines of whitespace...
+    } catch (err) { 
+      return console.error('invalid JSON', line)
+    }
+    if(js !== undefined)
+      write.call(stream, js)
+  }
+
+  function onData (data) {
+    var lines = (soFar + data).split('\n')
+    soFar = lines.pop()
+    while(lines.length) {
+      parse(lines.shift())
+    }
+  }
+
+  stream.write = onData
+  
+  var end = stream.end
+
+  stream.end = function (data) {
+    if(data)
+      stream.write(data)
+    //if there is any left over...
+    if(soFar) {
+      parse(soFar)
+    }
+    return end.call(stream)
+  }
+
+  stream.emit = function (event, data) {
+
+    if(event == 'data') {
+      data = JSON.stringify(data) + '\n'
+    }
+    //since all stream events only use one argument, this is okay...
+    EventEmitter.prototype.emit.call(stream, event, data)
+  }
+
+  return stream
+//  return es.pipeline(es.split(), es.parse(), stream, es.stringify())
+}
+
+exports.raw = function (stream) {
+  return stream
+}
+
+
+});
+
+require.define("/node_modules/scuttlebutt/util.js",function(require,module,exports,__dirname,__filename,process,global){exports.createId = 
+function () {
+  return [1,1,1].map(function () {
+    return Math.random().toString(16).substring(2).toUpperCase()
+  }).join('')
+}
+
+exports.filter = function (update, sources) {
+  var ts = update[1]
+  var source = update[2]
+  return (!sources || !sources[source] || sources[source] < ts)
+}
+
+});
+
+require.define("/node_modules/scuttlebutt/node_modules/monotonic-timestamp/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/scuttlebutt/node_modules/monotonic-timestamp/index.js",function(require,module,exports,__dirname,__filename,process,global){var _last = 0
+var _count = 1
+var LAST
+
+module.exports = 
+function () {
+  var t = Date.now()
+  var _t = t
+  if(_last == t) {
+    _t += ((_count++)/1000) 
+  } 
+  else _count = 1 
+
+  _last = t
+
+  if(_t === LAST)
+    throw new Error('LAST:' + LAST + ',' + _t)
+  LAST = _t
+  return _t
+}
+
+
+});
+
+require.define("/node_modules/duplex-emitter/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"./index.js"}
+});
+
+require.define("/node_modules/duplex-emitter/index.js",function(require,module,exports,__dirname,__filename,process,global){var objectDuplexStream = require('./object_duplex_stream');
+var emitter = require('./emitter');
+
+function duplexToEmitter(duplexStream) {
+  return emitter(objectDuplexStream(duplexStream));
+}
+
+module.exports = duplexToEmitter;
+});
+
+require.define("/node_modules/duplex-emitter/object_duplex_stream.js",function(require,module,exports,__dirname,__filename,process,global){var JSONStream = require('JSONStream');
+var duplexer = require('duplexer');
+
+// Transforms a raw stream into an
+// object duplex stream
+function toObjectDuplex(stream) {
+
+  //// Write Stream (Server -> Client)
+
+  // Create a write stream that accepts objects
+  // and spits out JSON, newline separated
+  var objectWriteStream = JSONStream.stringify();
+
+  // Pipe the stream to the client
+  objectWriteStream.pipe(stream);
+
+
+  //// Read Stream (Client -> Server)
+
+  // Create a read stream that parses JSON
+  // and spits out objects
+  var objectReadStream = JSONStream.parse([true]);
+
+  // Pipe the client raw data into the json parser
+  stream.pipe(objectReadStream);
+
+  /// Smush together the write and read streams into
+  /// one duplex stream
+  var duplexStream = duplexer(objectWriteStream, objectReadStream);
+  
+  return duplexStream;
+}
+
+module.exports = toObjectDuplex;
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/JSONStream/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/JSONStream/index.js",function(require,module,exports,__dirname,__filename,process,global){var Parser = require('jsonparse')
+  , Stream = require('stream').Stream
+
+/*
+
+  the value of this.stack that creationix's jsonparse has is weird.
+
+  it makes this code ugly, but his problem is way harder that mine,
+  so i'll forgive him.
+
+*/
+
+exports.parse = function (path) {
+
+  var stream = new Stream()
+  var parser = new Parser()
+  var count = 0
+  if(!path || !path.length)
+    path = null
+  parser.onValue = function () {
+    if(!this.root && this.stack.length == 1){
+      stream.root = this.value
+      }
+    if(!path || this.stack.length !== path.length)
+      return
+    var _path = []
+    for( var i = 0; i < (path.length - 1); i++) {
+      var key = path[i]
+      var c = this.stack[1 + (+i)]
+
+      if(!c) {
+        return
+      }
+      var m = check(key, c.key)
+      _path.push(c.key)
+
+       if(!m)
+        return
+
+    }
+    var c = this
+
+    var key = path[path.length - 1]
+      var m = check(key, c.key)
+     if(!m)
+      return
+      _path.push(c.key)
+
+  count ++
+  stream.emit('data', this.value[this.key])
+  }
+
+  parser._onToken = parser.onToken;
+
+  parser.onToken = function (token, value) {
+    parser._onToken(token, value);
+    if (this.stack.length === 0) {
+      if (stream.root) {
+        if(!path)
+          stream.emit('data', stream.root)
+        stream.emit('root', stream.root, count)
+        count = 0;
+        stream.root = null;
+      }
+    }
+  }
+
+  parser.onError = function (err) {
+    stream.emit('error', err)
+  }
+  stream.readable = true
+  stream.writable = true
+  stream.write = function (chunk) {
+    if('string' === typeof chunk) {
+      if ('undefined' === typeof Buffer) {
+        var buf = new Array(chunk.length)
+        for (var i = 0; i < chunk.length; i++) buf[i] = chunk.charCodeAt(i)
+        chunk = new Int32Array(buf)
+      } else {
+        chunk = new Buffer(chunk)
+      }
+    }
+    parser.write(chunk)
+  }
+  stream.end = function (data) {
+    if(data)
+      stream.write(data)
+    stream.emit('end')
+  }
+
+  stream.destroy = function () {
+    stream.emit('close');
+  }
+
+  return stream
+}
+
+function check (x, y) {
+  if ('string' === typeof x)
+    return y == x
+  else if (x && 'function' === typeof x.exec)
+    return x.exec(y)
+  else if ('boolean' === typeof x)
+    return x
+  else if ('function' === typeof x)
+    return x(y)
+  return false
+}
+
+exports.stringify = function (op, sep, cl) {
+  if (op === false){
+    op = ''
+    sep = '\n'
+    cl = ''
+  } else if (op == null) {
+
+    op = '[\n'
+    sep = '\n,\n'
+    cl = '\n]\n'
+
+  }
+
+  //else, what ever you like
+
+  var stream = new Stream ()
+    , first = true
+    , ended = false
+    , anyData = false
+  stream.write = function (data) {
+    anyData = true
+    var json = JSON.stringify(data)
+    if(first) { first = false ; stream.emit('data', op + json)}
+    else stream.emit('data', sep + json)
+  }
+  stream.end = function (data) {
+    if(ended)
+      return
+    ended = true
+    if(data) stream.write(data)
+    if(!anyData) stream.emit('data', op)
+    stream.emit('data', cl)
+
+    stream.emit('end')
+  }
+  stream.writable = true
+  stream.readable = true
+
+  return stream
+}
+
+exports.stringifyObject = function (op, sep, cl) {
+  if (op === false){
+    op = ''
+    sep = '\n'
+    cl = ''
+  } else if (op == null) {
+
+    op = '{\n'
+    sep = '\n,\n'
+    cl = '\n}\n'
+
+  }
+
+  //else, what ever you like
+
+  var stream = new Stream ()
+    , first = true
+    , ended = false
+    , anyData = false
+  stream.write = function (data) {
+    anyData = true
+    var json = JSON.stringify(data[0]) + ':' + JSON.stringify(data[1])
+    if(first) { first = false ; stream.emit('data', op + json)}
+    else stream.emit('data', sep + json)
+  }
+  stream.end = function (data) {
+    if(ended) return
+    ended = true
+    if(data) stream.write(data)
+    if(!anyData) stream.emit('data', op)
+    stream.emit('data', cl)
+
+    stream.emit('end')
+  }
+  stream.writable = true
+  stream.readable = true
+
+  return stream
+}
+
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/JSONStream/node_modules/jsonparse/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"jsonparse.js"}
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/JSONStream/node_modules/jsonparse/jsonparse.js",function(require,module,exports,__dirname,__filename,process,global){/*global Buffer*/
+// Named constants with unique integer values
+var C = {};
+// Tokens
+var LEFT_BRACE    = C.LEFT_BRACE    = 0x1;
+var RIGHT_BRACE   = C.RIGHT_BRACE   = 0x2;
+var LEFT_BRACKET  = C.LEFT_BRACKET  = 0x3;
+var RIGHT_BRACKET = C.RIGHT_BRACKET = 0x4;
+var COLON         = C.COLON         = 0x5;
+var COMMA         = C.COMMA         = 0x6;
+var TRUE          = C.TRUE          = 0x7;
+var FALSE         = C.FALSE         = 0x8;
+var NULL          = C.NULL          = 0x9;
+var STRING        = C.STRING        = 0xa;
+var NUMBER        = C.NUMBER        = 0xb;
+// Tokenizer States
+var START   = C.START   = 0x11;
+var TRUE1   = C.TRUE1   = 0x21;
+var TRUE2   = C.TRUE2   = 0x22;
+var TRUE3   = C.TRUE3   = 0x23;
+var FALSE1  = C.FALSE1  = 0x31;
+var FALSE2  = C.FALSE2  = 0x32;
+var FALSE3  = C.FALSE3  = 0x33;
+var FALSE4  = C.FALSE4  = 0x34;
+var NULL1   = C.NULL1   = 0x41;
+var NULL2   = C.NULL3   = 0x42;
+var NULL3   = C.NULL2   = 0x43;
+var NUMBER1 = C.NUMBER1 = 0x51;
+var NUMBER2 = C.NUMBER2 = 0x52;
+var NUMBER3 = C.NUMBER3 = 0x53;
+var NUMBER4 = C.NUMBER4 = 0x54;
+var NUMBER5 = C.NUMBER5 = 0x55;
+var NUMBER6 = C.NUMBER6 = 0x56;
+var NUMBER7 = C.NUMBER7 = 0x57;
+var NUMBER8 = C.NUMBER8 = 0x58;
+var STRING1 = C.STRING1 = 0x61;
+var STRING2 = C.STRING2 = 0x62;
+var STRING3 = C.STRING3 = 0x63;
+var STRING4 = C.STRING4 = 0x64;
+var STRING5 = C.STRING5 = 0x65;
+var STRING6 = C.STRING6 = 0x66;
+// Parser States
+var VALUE   = C.VALUE   = 0x71;
+var KEY     = C.KEY     = 0x72;
+// Parser Modes
+var OBJECT  = C.OBJECT  = 0x81;
+var ARRAY   = C.ARRAY   = 0x82;
+
+// Slow code to string converter (only used when throwing syntax errors)
+function toknam(code) {
+  var keys = Object.keys(C);
+  for (var i = 0, l = keys.length; i < l; i++) {
+    var key = keys[i];
+    if (C[key] === code) { return key; }
+  }
+  return code && ("0x" + code.toString(16));
+}
+
+
+function Parser() {
+  this.tState = START;
+  this.value = undefined;
+
+  this.string = undefined; // string data
+  this.unicode = undefined; // unicode escapes
+
+  // For number parsing
+  this.negative = undefined;
+  this.magnatude = undefined;
+  this.position = undefined;
+  this.exponent = undefined;
+  this.negativeExponent = undefined;
+  
+  this.key = undefined;
+  this.mode = undefined;
+  this.stack = [];
+  this.state = VALUE;
+}
+var proto = Parser.prototype;
+proto.charError = function (buffer, i) {
+  this.onError(new Error("Unexpected " + JSON.stringify(String.fromCharCode(buffer[i])) + " at position " + i + " in state " + toknam(this.tState)));
+};
+proto.onError = function (err) { throw err; };
+proto.write = function (buffer) {
+  if (typeof buffer === "string") buffer = new Buffer(buffer);
+  //process.stdout.write("Input: ");
+  //console.dir(buffer.toString());
+  var n;
+  for (var i = 0, l = buffer.length; i < l; i++) {
+    if (this.tState === START){
+      n = buffer[i];
+      if(n === 0x7b){ this.onToken(LEFT_BRACE, "{"); // {
+      }else if(n === 0x7d){ this.onToken(RIGHT_BRACE, "}"); // }
+      }else if(n === 0x5b){ this.onToken(LEFT_BRACKET, "["); // [
+      }else if(n === 0x5d){ this.onToken(RIGHT_BRACKET, "]"); // ]
+      }else if(n === 0x3a){ this.onToken(COLON, ":");  // :
+      }else if(n === 0x2c){ this.onToken(COMMA, ","); // ,
+      }else if(n === 0x74){ this.tState = TRUE1;  // t
+      }else if(n === 0x66){ this.tState = FALSE1;  // f
+      }else if(n === 0x6e){ this.tState = NULL1; // n
+      }else if(n === 0x22){ this.string = ""; this.tState = STRING1; // "
+      }else if(n === 0x2d){ this.negative = true; this.tState = NUMBER1; // -
+      }else if(n === 0x30){ this.magnatude = 0; this.tState = NUMBER2; // 0
+      }else{
+        if (n > 0x30 && n < 0x40) { // 1-9
+          this.magnatude = n - 0x30; this.tState = NUMBER3;
+        } else if (n === 0x20 || n === 0x09 || n === 0x0a || n === 0x0d) {
+          // whitespace
+        } else { this.charError(buffer, i); }
+      }
+    }else if (this.tState === STRING1){ // After open quote
+      n = buffer[i];
+      if (n >= 128) {
+        for (var j = i; buffer[j] >= 128 && j < buffer.length; j++);
+        this.string += buffer.slice(i, j).toString();
+        i = j - 1;
+      } else if (n === 0x22) { this.tState = START; this.onToken(STRING, this.string); this.string = undefined; }
+      else if (n === 0x5c) { this.tState = STRING2; }
+      else if (n >= 0x20) { this.string += String.fromCharCode(n); }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === STRING2){ // After backslash
+      n = buffer[i];
+      if(n === 0x22){ this.string += "\""; this.tState = STRING1;
+      }else if(n === 0x5c){ this.string += "\\"; this.tState = STRING1; 
+      }else if(n === 0x2f){ this.string += "\/"; this.tState = STRING1; 
+      }else if(n === 0x62){ this.string += "\b"; this.tState = STRING1; 
+      }else if(n === 0x66){ this.string += "\f"; this.tState = STRING1; 
+      }else if(n === 0x6e){ this.string += "\n"; this.tState = STRING1; 
+      }else if(n === 0x72){ this.string += "\r"; this.tState = STRING1; 
+      }else if(n === 0x74){ this.string += "\t"; this.tState = STRING1; 
+      }else if(n === 0x75){ this.unicode = ""; this.tState = STRING3;
+      }else{ 
+        this.charError(buffer, i); 
+      }
+    }else if (this.tState === STRING3 || this.tState === STRING4 || this.tState === STRING5 || this.tState === STRING6){ // unicode hex codes
+      n = buffer[i];
+      // 0-9 A-F a-f
+      if ((n >= 0x30 && n < 0x40) || (n > 0x40 && n <= 0x46) || (n > 0x60 && n <= 0x66)) {
+        this.unicode += String.fromCharCode(n);
+        if (this.tState++ === STRING6) {
+          this.string += String.fromCharCode(parseInt(this.unicode, 16));
+          this.unicode = undefined;
+          this.tState = STRING1; 
+        }
+      } else {
+        this.charError(buffer, i);
+      }
+    }else if (this.tState === NUMBER1){ // after minus
+      n = buffer[i];
+      if (n === 0x30) { this.magnatude = 0; this.tState = NUMBER2; }
+      else if (n > 0x30 && n < 0x40) { this.magnatude = n - 0x30; this.tState = NUMBER3; }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === NUMBER2){ // * After initial zero
+      n = buffer[i];
+      if(n === 0x2e){ // .
+        this.position = 0.1; this.tState = NUMBER4;
+      }else if(n === 0x65 ||  n === 0x45){ // e/E
+        this.exponent = 0; this.tState = NUMBER6;
+      }else{
+        this.tState = START;
+        this.onToken(NUMBER, 0);
+        this.magnatude = undefined;
+        this.negative = undefined;
+        i--;
+      }
+    }else if (this.tState === NUMBER3){ // * After digit (before period)
+      n = buffer[i];
+      if(n === 0x2e){ // .
+        this.position = 0.1; this.tState = NUMBER4;
+      }else if(n === 0x65 || n === 0x45){ // e/E
+        this.exponent = 0; this.tState = NUMBER6;
+      }else{
+        if (n >= 0x30 && n < 0x40) { this.magnatude = this.magnatude * 10 + n - 0x30; }
+        else {
+          this.tState = START; 
+          if (this.negative) {
+            this.magnatude = -this.magnatude;
+            this.negative = undefined;
+          }
+          this.onToken(NUMBER, this.magnatude); 
+          this.magnatude = undefined;
+          i--;
+        }
+      }
+    }else if (this.tState === NUMBER4){ // After period
+      n = buffer[i];
+      if (n >= 0x30 && n < 0x40) { // 0-9
+        this.magnatude += this.position * (n - 0x30);
+        this.position /= 10;
+        this.tState = NUMBER5; 
+      } else { this.charError(buffer, i); }
+    }else if (this.tState === NUMBER5){ // * After digit (after period)
+      n = buffer[i];
+      if (n >= 0x30 && n < 0x40) { // 0-9
+        this.magnatude += this.position * (n - 0x30);
+        this.position /= 10;
+      }
+      else if (n === 0x65 || n === 0x45) { this.exponent = 0; this.tState = NUMBER6; } // E/e
+      else {
+        this.tState = START; 
+        if (this.negative) {
+          this.magnatude = -this.magnatude;
+          this.negative = undefined;
+        }
+        this.onToken(NUMBER, this.negative ? -this.magnatude : this.magnatude); 
+        this.magnatude = undefined;
+        this.position = undefined;
+        i--; 
+      }
+    }else if (this.tState === NUMBER6){ // After E
+      n = buffer[i];
+      if (n === 0x2b || n === 0x2d) { // +/-
+        if (n === 0x2d) { this.negativeExponent = true; }
+        this.tState = NUMBER7;
+      }
+      else if (n >= 0x30 && n < 0x40) {
+        this.exponent = this.exponent * 10 + (n - 0x30);
+        this.tState = NUMBER8;
+      }
+      else { this.charError(buffer, i); }  
+    }else if (this.tState === NUMBER7){ // After +/-
+      n = buffer[i];
+      if (n >= 0x30 && n < 0x40) { // 0-9
+        this.exponent = this.exponent * 10 + (n - 0x30);
+        this.tState = NUMBER8;
+      }
+      else { this.charError(buffer, i); }  
+    }else if (this.tState === NUMBER8){ // * After digit (after +/-)
+      n = buffer[i];
+      if (n >= 0x30 && n < 0x40) { // 0-9
+        this.exponent = this.exponent * 10 + (n - 0x30);
+      }
+      else {
+        if (this.negativeExponent) {
+          this.exponent = -this.exponent;
+          this.negativeExponent = undefined;
+        }
+        this.magnatude *= Math.pow(10, this.exponent);
+        this.exponent = undefined;
+        if (this.negative) { 
+          this.magnatude = -this.magnatude;
+          this.negative = undefined;
+        }
+        this.tState = START;
+        this.onToken(NUMBER, this.magnatude);
+        this.magnatude = undefined;
+        i--; 
+      } 
+    }else if (this.tState === TRUE1){ // r
+      if (buffer[i] === 0x72) { this.tState = TRUE2; }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === TRUE2){ // u
+      if (buffer[i] === 0x75) { this.tState = TRUE3; }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === TRUE3){ // e
+      if (buffer[i] === 0x65) { this.tState = START; this.onToken(TRUE, true); }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === FALSE1){ // a
+      if (buffer[i] === 0x61) { this.tState = FALSE2; }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === FALSE2){ // l
+      if (buffer[i] === 0x6c) { this.tState = FALSE3; }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === FALSE3){ // s
+      if (buffer[i] === 0x73) { this.tState = FALSE4; }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === FALSE4){ // e
+      if (buffer[i] === 0x65) { this.tState = START; this.onToken(FALSE, false); }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === NULL1){ // u
+      if (buffer[i] === 0x75) { this.tState = NULL2; }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === NULL2){ // l
+      if (buffer[i] === 0x6c) { this.tState = NULL3; }
+      else { this.charError(buffer, i); }
+    }else if (this.tState === NULL3){ // l
+      if (buffer[i] === 0x6c) { this.tState = START; this.onToken(NULL, null); }
+      else { this.charError(buffer, i); }
+    }
+  }
+};
+proto.onToken = function (token, value) {
+  // Override this to get events
+};
+
+proto.parseError = function (token, value) {
+  this.onError(new Error("Unexpected " + toknam(token) + (value ? ("(" + JSON.stringify(value) + ")") : "") + " in state " + toknam(this.state)));
+};
+proto.onError = function (err) { throw err; };
+proto.push = function () {
+  this.stack.push({value: this.value, key: this.key, mode: this.mode});
+};
+proto.pop = function () {
+  var value = this.value;
+  var parent = this.stack.pop();
+  this.value = parent.value;
+  this.key = parent.key;
+  this.mode = parent.mode;
+  this.emit(value);
+  if (!this.mode) { this.state = VALUE; }
+};
+proto.emit = function (value) {
+  if (this.mode) { this.state = COMMA; }
+  this.onValue(value);
+};
+proto.onValue = function (value) {
+  // Override me
+};  
+proto.onToken = function (token, value) {
+  //console.log("OnToken: state=%s token=%s %s", toknam(this.state), toknam(token), value?JSON.stringify(value):"");
+  if(this.state === VALUE){
+    if(token === STRING || token === NUMBER || token === TRUE || token === FALSE || token === NULL){
+      if (this.value) {
+        this.value[this.key] = value;
+      }
+      this.emit(value);  
+    }else if(token === LEFT_BRACE){
+      this.push();
+      if (this.value) {
+        this.value = this.value[this.key] = {};
+      } else {
+        this.value = {};
+      }
+      this.key = undefined;
+      this.state = KEY;
+      this.mode = OBJECT;
+    }else if(token === LEFT_BRACKET){
+      this.push();
+      if (this.value) {
+        this.value = this.value[this.key] = [];
+      } else {
+        this.value = [];
+      }
+      this.key = 0;
+      this.mode = ARRAY;
+      this.state = VALUE;
+    }else if(token === RIGHT_BRACE){
+      if (this.mode === OBJECT) {
+        this.pop();
+      } else {
+        this.parseError(token, value);
+      }
+    }else if(token === RIGHT_BRACKET){
+      if (this.mode === ARRAY) {
+        this.pop();
+      } else {
+        this.parseError(token, value);
+      }
+    }else{
+      this.parseError(token, value);
+    }
+  }else if(this.state === KEY){
+    if (token === STRING) {
+      this.key = value;
+      this.state = COLON;
+    } else if (token === RIGHT_BRACE) {
+      this.pop();
+    } else {
+      this.parseError(token, value);
+    }
+  }else if(this.state === COLON){
+    if (token === COLON) { this.state = VALUE; }
+    else { this.parseError(token, value); }
+  }else if(this.state === COMMA){
+    if (token === COMMA) { 
+      if (this.mode === ARRAY) { this.key++; this.state = VALUE; }
+      else if (this.mode === OBJECT) { this.state = KEY; }
+
+    } else if (token === RIGHT_BRACKET && this.mode === ARRAY || token === RIGHT_BRACE && this.mode === OBJECT) {
+      this.pop();
+    } else {
+      this.parseError(token, value);
+    }
+  }else{
+    this.parseError(token, value);
+  }
+};
+
+module.exports = Parser;
+
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/duplexer/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index"}
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/duplexer/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require("stream")
+    , writeMethods = ["write", "end", "destroy"]
+    , readMethods = ["resume", "pause"]
+    , readEvents = ["data", "close"]
+    , slice = Array.prototype.slice
+
+module.exports = duplex
+
+function duplex(writer, reader) {
+    var stream = new Stream()
+        , ended = false
+
+    Object.defineProperties(stream, {
+        writable: {
+            get: getWritable
+        }
+        , readable: {
+            get: getReadable
+        }
+    })
+
+    writeMethods.forEach(proxyWriter)
+
+    readMethods.forEach(proxyReader)
+
+    readEvents.forEach(proxyStream)
+
+    reader.on("end", handleEnd)
+
+    writer.on("error", reemit)
+    reader.on("error", reemit)
+
+    return stream
+
+    function getWritable() {
+        return writer.writable
+    }
+
+    function getReadable() {
+        return reader.readable
+    }
+
+    function proxyWriter(methodName) {
+        stream[methodName] = method
+
+        function method() {
+            return writer[methodName].apply(writer, arguments)
+        }
+    }
+
+    function proxyReader(methodName) {
+        stream[methodName] = method
+
+        function method() {
+            stream.emit(methodName)
+            var func = reader[methodName]
+            if (func) {
+                return func.apply(reader, arguments)
+            }
+            reader.emit(methodName)
+        }
+    }
+
+    function proxyStream(methodName) {
+        reader.on(methodName, reemit)
+
+        function reemit() {
+            var args = slice.call(arguments)
+            args.unshift(methodName)
+            stream.emit.apply(stream, args)
+        }
+    }
+
+    function handleEnd() {
+        if (ended) {
+            return
+        }
+        ended = true
+        var args = slice.call(arguments)
+        args.unshift("end")
+        stream.emit.apply(stream, args)
+    }
+
+    function reemit(err) {
+        stream.emit("error", err)
+    }
+}
+});
+
+require.define("/node_modules/duplex-emitter/emitter.js",function(require,module,exports,__dirname,__filename,process,global){var EventEmitter = require('events').EventEmitter;
+var emitStream = require('emit-stream');
+
+function emitter(stream) {
+  // Read events from the client
+  var readEmitter = emitStream.fromStream(stream);
+
+  stream.on('error', function(err) {
+    readEmitter.emit('error', err);
+  });
+
+  // Write events to the client
+  var writeEmitter = new EventEmitter;
+  var writeStream = emitStream.toStream(writeEmitter);
+
+  writeStream.on('error', function(err) {
+    readEmitter.emit('error', err);
+  });
+
+  writeStream.pipe(stream);
+
+  var on = readEmitter.on.bind(readEmitter);
+
+  return {
+    on: on,
+    addListener: on,
+    once: readEmitter.once.bind(readEmitter),
+    removeListener: readEmitter.removeListener.bind(readEmitter),
+    emit: writeEmitter.emit.bind(writeEmitter)
+  };
+}
+
+module.exports = emitter;
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/emit-stream/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/emit-stream/index.js",function(require,module,exports,__dirname,__filename,process,global){var EventEmitter = require('events').EventEmitter;
+var through = require('through');
+
+exports = module.exports = function (ev) {
+    if (typeof ev.pipe === 'function') {
+        return exports.fromStream(ev);
+    }
+    else return exports.toStream(ev)
+};
+
+exports.toStream = function (ev) {
+    var s = through(
+        function write (args) {
+            this.emit('data', args);
+        },
+        function end () {
+            var ix = ev._emitStreams.indexOf(s);
+            ev._emitStreams.splice(ix, 1);
+        }
+    );
+    
+    if (!ev._emitStreams) {
+        ev._emitStreams = [];
+        
+        var emit = ev.emit;
+        ev.emit = function () {
+            if (s.writable) {
+                var args = [].slice.call(arguments);
+                ev._emitStreams.forEach(function (es) {
+                    es.write(args);
+                });
+            }
+            emit.apply(ev, arguments);
+        };
+    }
+    ev._emitStreams.push(s);
+    
+    return s;
+};
+
+exports.fromStream = function (s) {
+    var ev = new EventEmitter;
+    
+    s.pipe(through(function (args) {
+        ev.emit.apply(ev, args);
+    }));
+    
+    return ev;
+};
+
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/emit-stream/node_modules/through/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {"main":"index.js"}
+});
+
+require.define("/node_modules/duplex-emitter/node_modules/emit-stream/node_modules/through/index.js",function(require,module,exports,__dirname,__filename,process,global){var Stream = require('stream')
+
+// through
+//
+// a stream that does nothing but re-emit the input.
+// useful for aggregating a series of changing but not ending streams into one stream)
+
+exports = module.exports = through
+through.through = through
+
+//create a readable writable stream.
+
+function through (write, end) {
+  write = write || function (data) { this.emit('data', data) }
+  end = end || function () { this.emit('end') }
+
+  var ended = false, destroyed = false
+  var stream = new Stream()
+  stream.readable = stream.writable = true
+  stream.paused = false  
+  stream.write = function (data) {
+    write.call(this, data)
+    return !stream.paused
+  }
+  //this will be registered as the first 'end' listener
+  //must call destroy next tick, to make sure we're after any
+  //stream piped from here. 
+  stream.on('end', function () {
+    stream.readable = false
+    if(!stream.writable)
+      process.nextTick(function () {
+        stream.destroy()
+      })
+  })
+
+  stream.end = function (data) {
+    if(ended) return 
+    //this breaks, because pipe doesn't check writable before calling end.
+    //throw new Error('cannot call end twice')
+    ended = true
+    if(arguments.length) stream.write(data)
+    this.writable = false
+    end.call(this)
+    if(!this.readable)
+      this.destroy()
+  }
+  stream.destroy = function () {
+    if(destroyed) return
+    destroyed = true
+    ended = true
+    stream.writable = stream.readable = false
+    stream.emit('close')
+  }
+  stream.pause = function () {
+    if(stream.paused) return
+    stream.paused = true
+    stream.emit('pause')
+  }
+  stream.resume = function () {
+    if(stream.paused) {
+      stream.paused = false
+      stream.emit('drain')
+    }
+  }
+  return stream
+}
+
+
+});
+
 require.define("/node_modules/voxel-hello-world/package.json",function(require,module,exports,__dirname,__filename,process,global){module.exports = {}
 });
 
@@ -1475,187 +5211,6 @@ Chunker.prototype.voxelVector = function(pos) {
   var vy = (size + Math.floor(pos.y / cubeSize) % size) % size
   var vz = (size + Math.floor(pos.z / cubeSize) % size) % size
   return {x: Math.abs(vx), y: Math.abs(vy), z: Math.abs(vz)}
-};
-
-});
-
-require.define("events",function(require,module,exports,__dirname,__filename,process,global){if (!process.EventEmitter) process.EventEmitter = function () {};
-
-var EventEmitter = exports.EventEmitter = process.EventEmitter;
-var isArray = typeof Array.isArray === 'function'
-    ? Array.isArray
-    : function (xs) {
-        return Object.prototype.toString.call(xs) === '[object Array]'
-    }
-;
-function indexOf (xs, x) {
-    if (xs.indexOf) return xs.indexOf(x);
-    for (var i = 0; i < xs.length; i++) {
-        if (x === xs[i]) return i;
-    }
-    return -1;
-}
-
-// By default EventEmitters will print a warning if more than
-// 10 listeners are added to it. This is a useful default which
-// helps finding memory leaks.
-//
-// Obviously not all Emitters should be limited to 10. This function allows
-// that to be increased. Set to zero for unlimited.
-var defaultMaxListeners = 10;
-EventEmitter.prototype.setMaxListeners = function(n) {
-  if (!this._events) this._events = {};
-  this._events.maxListeners = n;
-};
-
-
-EventEmitter.prototype.emit = function(type) {
-  // If there is no 'error' event listener then throw.
-  if (type === 'error') {
-    if (!this._events || !this._events.error ||
-        (isArray(this._events.error) && !this._events.error.length))
-    {
-      if (arguments[1] instanceof Error) {
-        throw arguments[1]; // Unhandled 'error' event
-      } else {
-        throw new Error("Uncaught, unspecified 'error' event.");
-      }
-      return false;
-    }
-  }
-
-  if (!this._events) return false;
-  var handler = this._events[type];
-  if (!handler) return false;
-
-  if (typeof handler == 'function') {
-    switch (arguments.length) {
-      // fast cases
-      case 1:
-        handler.call(this);
-        break;
-      case 2:
-        handler.call(this, arguments[1]);
-        break;
-      case 3:
-        handler.call(this, arguments[1], arguments[2]);
-        break;
-      // slower
-      default:
-        var args = Array.prototype.slice.call(arguments, 1);
-        handler.apply(this, args);
-    }
-    return true;
-
-  } else if (isArray(handler)) {
-    var args = Array.prototype.slice.call(arguments, 1);
-
-    var listeners = handler.slice();
-    for (var i = 0, l = listeners.length; i < l; i++) {
-      listeners[i].apply(this, args);
-    }
-    return true;
-
-  } else {
-    return false;
-  }
-};
-
-// EventEmitter is defined in src/node_events.cc
-// EventEmitter.prototype.emit() is also defined there.
-EventEmitter.prototype.addListener = function(type, listener) {
-  if ('function' !== typeof listener) {
-    throw new Error('addListener only takes instances of Function');
-  }
-
-  if (!this._events) this._events = {};
-
-  // To avoid recursion in the case that type == "newListeners"! Before
-  // adding it to the listeners, first emit "newListeners".
-  this.emit('newListener', type, listener);
-
-  if (!this._events[type]) {
-    // Optimize the case of one listener. Don't need the extra array object.
-    this._events[type] = listener;
-  } else if (isArray(this._events[type])) {
-
-    // Check for listener leak
-    if (!this._events[type].warned) {
-      var m;
-      if (this._events.maxListeners !== undefined) {
-        m = this._events.maxListeners;
-      } else {
-        m = defaultMaxListeners;
-      }
-
-      if (m && m > 0 && this._events[type].length > m) {
-        this._events[type].warned = true;
-        console.error('(node) warning: possible EventEmitter memory ' +
-                      'leak detected. %d listeners added. ' +
-                      'Use emitter.setMaxListeners() to increase limit.',
-                      this._events[type].length);
-        console.trace();
-      }
-    }
-
-    // If we've already got an array, just append.
-    this._events[type].push(listener);
-  } else {
-    // Adding the second element, need to change to array.
-    this._events[type] = [this._events[type], listener];
-  }
-
-  return this;
-};
-
-EventEmitter.prototype.on = EventEmitter.prototype.addListener;
-
-EventEmitter.prototype.once = function(type, listener) {
-  var self = this;
-  self.on(type, function g() {
-    self.removeListener(type, g);
-    listener.apply(this, arguments);
-  });
-
-  return this;
-};
-
-EventEmitter.prototype.removeListener = function(type, listener) {
-  if ('function' !== typeof listener) {
-    throw new Error('removeListener only takes instances of Function');
-  }
-
-  // does not use listeners(), so no side effect of creating _events[type]
-  if (!this._events || !this._events[type]) return this;
-
-  var list = this._events[type];
-
-  if (isArray(list)) {
-    var i = indexOf(list, listener);
-    if (i < 0) return this;
-    list.splice(i, 1);
-    if (list.length == 0)
-      delete this._events[type];
-  } else if (this._events[type] === listener) {
-    delete this._events[type];
-  }
-
-  return this;
-};
-
-EventEmitter.prototype.removeAllListeners = function(type) {
-  // does not use listeners(), so no side effect of creating _events[type]
-  if (type && this._events && this._events[type]) this._events[type] = null;
-  return this;
-};
-
-EventEmitter.prototype.listeners = function(type) {
-  if (!this._events) this._events = {};
-  if (!this._events[type]) this._events[type] = [];
-  if (!isArray(this._events[type])) {
-    this._events[type] = [this._events[type]];
-  }
-  return this._events[type];
 };
 
 });
@@ -39550,482 +43105,6 @@ function shim(el) {
     el.oRequestPointerLock ||
     null
 }
-
-});
-
-require.define("stream",function(require,module,exports,__dirname,__filename,process,global){var events = require('events');
-var util = require('util');
-
-function Stream() {
-  events.EventEmitter.call(this);
-}
-util.inherits(Stream, events.EventEmitter);
-module.exports = Stream;
-// Backwards-compat with node 0.4.x
-Stream.Stream = Stream;
-
-Stream.prototype.pipe = function(dest, options) {
-  var source = this;
-
-  function ondata(chunk) {
-    if (dest.writable) {
-      if (false === dest.write(chunk) && source.pause) {
-        source.pause();
-      }
-    }
-  }
-
-  source.on('data', ondata);
-
-  function ondrain() {
-    if (source.readable && source.resume) {
-      source.resume();
-    }
-  }
-
-  dest.on('drain', ondrain);
-
-  // If the 'end' option is not supplied, dest.end() will be called when
-  // source gets the 'end' or 'close' events.  Only dest.end() once, and
-  // only when all sources have ended.
-  if (!dest._isStdio && (!options || options.end !== false)) {
-    dest._pipeCount = dest._pipeCount || 0;
-    dest._pipeCount++;
-
-    source.on('end', onend);
-    source.on('close', onclose);
-  }
-
-  var didOnEnd = false;
-  function onend() {
-    if (didOnEnd) return;
-    didOnEnd = true;
-
-    dest._pipeCount--;
-
-    // remove the listeners
-    cleanup();
-
-    if (dest._pipeCount > 0) {
-      // waiting for other incoming streams to end.
-      return;
-    }
-
-    dest.end();
-  }
-
-
-  function onclose() {
-    if (didOnEnd) return;
-    didOnEnd = true;
-
-    dest._pipeCount--;
-
-    // remove the listeners
-    cleanup();
-
-    if (dest._pipeCount > 0) {
-      // waiting for other incoming streams to end.
-      return;
-    }
-
-    dest.destroy();
-  }
-
-  // don't leave dangling pipes when there are errors.
-  function onerror(er) {
-    cleanup();
-    if (this.listeners('error').length === 0) {
-      throw er; // Unhandled stream error in pipe.
-    }
-  }
-
-  source.on('error', onerror);
-  dest.on('error', onerror);
-
-  // remove all the event listeners that were added.
-  function cleanup() {
-    source.removeListener('data', ondata);
-    dest.removeListener('drain', ondrain);
-
-    source.removeListener('end', onend);
-    source.removeListener('close', onclose);
-
-    source.removeListener('error', onerror);
-    dest.removeListener('error', onerror);
-
-    source.removeListener('end', cleanup);
-    source.removeListener('close', cleanup);
-
-    dest.removeListener('end', cleanup);
-    dest.removeListener('close', cleanup);
-  }
-
-  source.on('end', cleanup);
-  source.on('close', cleanup);
-
-  dest.on('end', cleanup);
-  dest.on('close', cleanup);
-
-  dest.emit('pipe', source);
-
-  // Allow for unix-like usage: A.pipe(B).pipe(C)
-  return dest;
-};
-
-});
-
-require.define("util",function(require,module,exports,__dirname,__filename,process,global){var events = require('events');
-
-exports.isArray = isArray;
-exports.isDate = function(obj){return Object.prototype.toString.call(obj) === '[object Date]'};
-exports.isRegExp = function(obj){return Object.prototype.toString.call(obj) === '[object RegExp]'};
-
-
-exports.print = function () {};
-exports.puts = function () {};
-exports.debug = function() {};
-
-exports.inspect = function(obj, showHidden, depth, colors) {
-  var seen = [];
-
-  var stylize = function(str, styleType) {
-    // http://en.wikipedia.org/wiki/ANSI_escape_code#graphics
-    var styles =
-        { 'bold' : [1, 22],
-          'italic' : [3, 23],
-          'underline' : [4, 24],
-          'inverse' : [7, 27],
-          'white' : [37, 39],
-          'grey' : [90, 39],
-          'black' : [30, 39],
-          'blue' : [34, 39],
-          'cyan' : [36, 39],
-          'green' : [32, 39],
-          'magenta' : [35, 39],
-          'red' : [31, 39],
-          'yellow' : [33, 39] };
-
-    var style =
-        { 'special': 'cyan',
-          'number': 'blue',
-          'boolean': 'yellow',
-          'undefined': 'grey',
-          'null': 'bold',
-          'string': 'green',
-          'date': 'magenta',
-          // "name": intentionally not styling
-          'regexp': 'red' }[styleType];
-
-    if (style) {
-      return '\033[' + styles[style][0] + 'm' + str +
-             '\033[' + styles[style][1] + 'm';
-    } else {
-      return str;
-    }
-  };
-  if (! colors) {
-    stylize = function(str, styleType) { return str; };
-  }
-
-  function format(value, recurseTimes) {
-    // Provide a hook for user-specified inspect functions.
-    // Check that value is an object with an inspect function on it
-    if (value && typeof value.inspect === 'function' &&
-        // Filter out the util module, it's inspect function is special
-        value !== exports &&
-        // Also filter out any prototype objects using the circular check.
-        !(value.constructor && value.constructor.prototype === value)) {
-      return value.inspect(recurseTimes);
-    }
-
-    // Primitive types cannot have properties
-    switch (typeof value) {
-      case 'undefined':
-        return stylize('undefined', 'undefined');
-
-      case 'string':
-        var simple = '\'' + JSON.stringify(value).replace(/^"|"$/g, '')
-                                                 .replace(/'/g, "\\'")
-                                                 .replace(/\\"/g, '"') + '\'';
-        return stylize(simple, 'string');
-
-      case 'number':
-        return stylize('' + value, 'number');
-
-      case 'boolean':
-        return stylize('' + value, 'boolean');
-    }
-    // For some reason typeof null is "object", so special case here.
-    if (value === null) {
-      return stylize('null', 'null');
-    }
-
-    // Look up the keys of the object.
-    var visible_keys = Object_keys(value);
-    var keys = showHidden ? Object_getOwnPropertyNames(value) : visible_keys;
-
-    // Functions without properties can be shortcutted.
-    if (typeof value === 'function' && keys.length === 0) {
-      if (isRegExp(value)) {
-        return stylize('' + value, 'regexp');
-      } else {
-        var name = value.name ? ': ' + value.name : '';
-        return stylize('[Function' + name + ']', 'special');
-      }
-    }
-
-    // Dates without properties can be shortcutted
-    if (isDate(value) && keys.length === 0) {
-      return stylize(value.toUTCString(), 'date');
-    }
-
-    var base, type, braces;
-    // Determine the object type
-    if (isArray(value)) {
-      type = 'Array';
-      braces = ['[', ']'];
-    } else {
-      type = 'Object';
-      braces = ['{', '}'];
-    }
-
-    // Make functions say that they are functions
-    if (typeof value === 'function') {
-      var n = value.name ? ': ' + value.name : '';
-      base = (isRegExp(value)) ? ' ' + value : ' [Function' + n + ']';
-    } else {
-      base = '';
-    }
-
-    // Make dates with properties first say the date
-    if (isDate(value)) {
-      base = ' ' + value.toUTCString();
-    }
-
-    if (keys.length === 0) {
-      return braces[0] + base + braces[1];
-    }
-
-    if (recurseTimes < 0) {
-      if (isRegExp(value)) {
-        return stylize('' + value, 'regexp');
-      } else {
-        return stylize('[Object]', 'special');
-      }
-    }
-
-    seen.push(value);
-
-    var output = keys.map(function(key) {
-      var name, str;
-      if (value.__lookupGetter__) {
-        if (value.__lookupGetter__(key)) {
-          if (value.__lookupSetter__(key)) {
-            str = stylize('[Getter/Setter]', 'special');
-          } else {
-            str = stylize('[Getter]', 'special');
-          }
-        } else {
-          if (value.__lookupSetter__(key)) {
-            str = stylize('[Setter]', 'special');
-          }
-        }
-      }
-      if (visible_keys.indexOf(key) < 0) {
-        name = '[' + key + ']';
-      }
-      if (!str) {
-        if (seen.indexOf(value[key]) < 0) {
-          if (recurseTimes === null) {
-            str = format(value[key]);
-          } else {
-            str = format(value[key], recurseTimes - 1);
-          }
-          if (str.indexOf('\n') > -1) {
-            if (isArray(value)) {
-              str = str.split('\n').map(function(line) {
-                return '  ' + line;
-              }).join('\n').substr(2);
-            } else {
-              str = '\n' + str.split('\n').map(function(line) {
-                return '   ' + line;
-              }).join('\n');
-            }
-          }
-        } else {
-          str = stylize('[Circular]', 'special');
-        }
-      }
-      if (typeof name === 'undefined') {
-        if (type === 'Array' && key.match(/^\d+$/)) {
-          return str;
-        }
-        name = JSON.stringify('' + key);
-        if (name.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)) {
-          name = name.substr(1, name.length - 2);
-          name = stylize(name, 'name');
-        } else {
-          name = name.replace(/'/g, "\\'")
-                     .replace(/\\"/g, '"')
-                     .replace(/(^"|"$)/g, "'");
-          name = stylize(name, 'string');
-        }
-      }
-
-      return name + ': ' + str;
-    });
-
-    seen.pop();
-
-    var numLinesEst = 0;
-    var length = output.reduce(function(prev, cur) {
-      numLinesEst++;
-      if (cur.indexOf('\n') >= 0) numLinesEst++;
-      return prev + cur.length + 1;
-    }, 0);
-
-    if (length > 50) {
-      output = braces[0] +
-               (base === '' ? '' : base + '\n ') +
-               ' ' +
-               output.join(',\n  ') +
-               ' ' +
-               braces[1];
-
-    } else {
-      output = braces[0] + base + ' ' + output.join(', ') + ' ' + braces[1];
-    }
-
-    return output;
-  }
-  return format(obj, (typeof depth === 'undefined' ? 2 : depth));
-};
-
-
-function isArray(ar) {
-  return ar instanceof Array ||
-         Array.isArray(ar) ||
-         (ar && ar !== Object.prototype && isArray(ar.__proto__));
-}
-
-
-function isRegExp(re) {
-  return re instanceof RegExp ||
-    (typeof re === 'object' && Object.prototype.toString.call(re) === '[object RegExp]');
-}
-
-
-function isDate(d) {
-  if (d instanceof Date) return true;
-  if (typeof d !== 'object') return false;
-  var properties = Date.prototype && Object_getOwnPropertyNames(Date.prototype);
-  var proto = d.__proto__ && Object_getOwnPropertyNames(d.__proto__);
-  return JSON.stringify(proto) === JSON.stringify(properties);
-}
-
-function pad(n) {
-  return n < 10 ? '0' + n.toString(10) : n.toString(10);
-}
-
-var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
-              'Oct', 'Nov', 'Dec'];
-
-// 26 Feb 16:19:34
-function timestamp() {
-  var d = new Date();
-  var time = [pad(d.getHours()),
-              pad(d.getMinutes()),
-              pad(d.getSeconds())].join(':');
-  return [d.getDate(), months[d.getMonth()], time].join(' ');
-}
-
-exports.log = function (msg) {};
-
-exports.pump = null;
-
-var Object_keys = Object.keys || function (obj) {
-    var res = [];
-    for (var key in obj) res.push(key);
-    return res;
-};
-
-var Object_getOwnPropertyNames = Object.getOwnPropertyNames || function (obj) {
-    var res = [];
-    for (var key in obj) {
-        if (Object.hasOwnProperty.call(obj, key)) res.push(key);
-    }
-    return res;
-};
-
-var Object_create = Object.create || function (prototype, properties) {
-    // from es5-shim
-    var object;
-    if (prototype === null) {
-        object = { '__proto__' : null };
-    }
-    else {
-        if (typeof prototype !== 'object') {
-            throw new TypeError(
-                'typeof prototype[' + (typeof prototype) + '] != \'object\''
-            );
-        }
-        var Type = function () {};
-        Type.prototype = prototype;
-        object = new Type();
-        object.__proto__ = prototype;
-    }
-    if (typeof properties !== 'undefined' && Object.defineProperties) {
-        Object.defineProperties(object, properties);
-    }
-    return object;
-};
-
-exports.inherits = function(ctor, superCtor) {
-  ctor.super_ = superCtor;
-  ctor.prototype = Object_create(superCtor.prototype, {
-    constructor: {
-      value: ctor,
-      enumerable: false,
-      writable: true,
-      configurable: true
-    }
-  });
-};
-
-var formatRegExp = /%[sdj%]/g;
-exports.format = function(f) {
-  if (typeof f !== 'string') {
-    var objects = [];
-    for (var i = 0; i < arguments.length; i++) {
-      objects.push(exports.inspect(arguments[i]));
-    }
-    return objects.join(' ');
-  }
-
-  var i = 1;
-  var args = arguments;
-  var len = args.length;
-  var str = String(f).replace(formatRegExp, function(x) {
-    if (x === '%') return '%';
-    if (i >= len) return x;
-    switch (x) {
-      case '%s': return String(args[i++]);
-      case '%d': return Number(args[i++]);
-      case '%j': return JSON.stringify(args[i++]);
-      default:
-        return x;
-    }
-  });
-  for(var x = args[i]; i < len; x = args[++i]){
-    if (x === null || typeof x !== 'object') {
-      str += ' ' + x;
-    } else {
-      str += ' ' + exports.inspect(x);
-    }
-  }
-  return str;
-};
 
 });
 
@@ -81125,21 +84204,65 @@ module.exports = function(dir) {
 
 });
 
-require.define("/client.js",function(require,module,exports,__dirname,__filename,process,global){var game = require('voxel-hello-world')
-//var regionChange = require('voxel-region-change')
+require.define("/client.js",function(require,module,exports,__dirname,__filename,process,global){var url = require('url')
+var websocket = require('websocket-stream')
+var MuxDemux = require('mux-demux')
+var Model = require('scuttlebutt/model')
+var duplexEmitter = require('duplex-emitter')
 
-var voxelEl = document.querySelector('#voxel')
-var chunkEl = document.querySelector('#chunk')
+window.socket = websocket('ws://' + url.parse(window.location.href).host)
+var emitter
+var connected = false
 
-window.game = game // for debugging
 
-game.voxelRegion.on('change', function(pos) {
-  voxelEl.innerHTML = JSON.stringify(pos)
+var mdm = MuxDemux()
+mdm.on('connection', function (stream) {
+  if (stream.meta === "emitter") {
+    window.emitter = emitter = duplexEmitter(stream)
+    connected = true
+
+    emitter.on('id', function(id) {
+      console.log('id', id)
+      playerID = id
+    })
+
+      emitter.on('settings', function(settings) {
+      window.game = game = createGame(settings)
+      
+      //emitter.emit('generated', Date.now())
+    })
+  }
+  // if (stream.meta === "voxels") {
+  //    var voxels = new Model()
+  //    voxels.on('update', function(data, value) {
+  //      var val = data[1]
+  //      var pos = data[0].split('|')
+  //      var ckey = pos.splice(0,3).join('|')
+  //      pos = {x: +pos[0], y: +pos[1], z: +pos[2]}
+  //      var set = voxelAtChunkIndexAndVoxelVector(ckey, pos, val)
+  //      game.showChunk(game.voxels.chunks[ckey])
+  //    })
+  // 
+  //    stream.pipe(voxels.createStream()).pipe(stream)
+  //}
 })
+socket.pipe(mdm).pipe(socket)
+socket.on('end', function() { connected = false })
 
-game.chunkRegion.on('change', function(pos) {
-  chunkEl.innerHTML = JSON.stringify(pos)
-})
+function createGame(options) {
+	var game = require('voxel-hello-world')
+
+	var voxelEl = document.querySelector('#voxel')
+	var chunkEl = document.querySelector('#chunk')
+
+	game.voxelRegion.on('change', function(pos) {
+	  voxelEl.innerHTML = JSON.stringify(pos)
+	})
+
+	game.chunkRegion.on('change', function(pos) {
+	  chunkEl.innerHTML = JSON.stringify(pos)
+	})
+}
 
 
 });
