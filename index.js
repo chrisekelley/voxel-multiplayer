@@ -10,7 +10,8 @@ var blockSelector = toolbar({el: '#tools'})
 var game = createGame({
   generate: voxel.generator['Valley'],
   startingPosition: [185, 100, 0],
-  texturePath: './textures/'
+  worldOrigin: [0,0,0],
+  texturePath: texturePath
 })
 
 window.game = game // for debugging

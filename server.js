@@ -39,8 +39,11 @@ var settings = {
   startingPosition: [185, 100, 0],
   // worldOrigin: {x: 0, y: 0, z: 0},
   //worldOrigin: [185, 100, 0],
+  worldOrigin: [0,0,0],
   //scaleFactor: scaleFactor,
   controlOptions: {jump: 6},
+  controlsDisabled: true,
+  generateChunks: false
 }
 var game = engine(settings)
 var server = http.createServer(ecstatic(path.join(__dirname, 'www')))

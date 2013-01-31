@@ -14,14 +14,16 @@ var blockSelector = toolbar({el: '#tools'})
 var currentMaterial = 1
 var debris = require('voxel-debris')
 
-//window.game = game = createGame()
+
 
 window.socket = websocket('ws://' + url.parse(window.location.href).host)
 var emitter
 var connected = false
 var mdm = MuxDemux()
 mdm.on('connection', function (stream) {
+  console.log("stream.meta: " + stream.meta)
   if (stream.meta === "emitter") {
+	console.log("initing emitter.")
     window.emitter = emitter = duplexEmitter(stream)
     connected = true
 
@@ -30,11 +32,11 @@ mdm.on('connection', function (stream) {
       playerID = id
     })
 	
-	// window.game = game = createGame()
+	window.game = game = createGame()
 
     emitter.on('settings', function(settings) {
           //window.game = game = createGame(settings)
-    	  window.game = game = createGame()
+    	  //window.game = game = createGame()
     	  console.log("starting game - setting generated.")
           emitter.emit('generated', Date.now())
         })
